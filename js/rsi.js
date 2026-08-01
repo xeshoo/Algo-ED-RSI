@@ -386,6 +386,7 @@ const RSI = (() => {
         }
       }
       renderAttemptTracking(step);
+      updateNextState(step); // re-evaluate NEXT button
     });
 
     // Field bindings
@@ -603,7 +604,10 @@ const RSI = (() => {
       nextBtn.disabled = !allChecked;
     } else if (step.decision) {
       nextBtn.disabled = true; // auto-advances on selection
-    } else if (step.timer) {
+    } else if (step.attemptTracking) {
+      // NEXT enabled only after at least one attempt is completed
+      nextBtn.disabled = attempts.length === 0;
+    } else if (step.timer && !step.attemptTracking) {
       nextBtn.disabled = true; // enabled when timer completes
     } else {
       nextBtn.disabled = false;

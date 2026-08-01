@@ -99,7 +99,6 @@ const DATA = {
       {
         id: "laryngoscopy",
         name: "Laryngoscopy",
-        timer: { startOnEnter: true, label: "Attempt timer — aim <30 seconds" },
         content: "Insert laryngoscope, visualize cords. Record Cormack-Lehane grade.",
         attemptTracking: true,
         fields: [
@@ -176,7 +175,6 @@ const DATA = {
       {
         id: "laryngoscopy",
         name: "Laryngoscopy",
-        timer: { startOnEnter: true, label: "Attempt timer" },
         content: "Straight blade (Miller) preferred <2 years. Cuffed ETT acceptable from term neonate.",
         attemptTracking: true,
         fields: [
