@@ -27,6 +27,15 @@ const App = (() => {
     bindReports();
     registerSW();
     navigateTo("dashboard");
+
+    // Unlock Web Speech API on first user interaction (required by iOS/Android)
+    const unlockVoice = () => {
+      Voice.unlock();
+      document.removeEventListener("touchstart", unlockVoice);
+      document.removeEventListener("click", unlockVoice);
+    };
+    document.addEventListener("touchstart", unlockVoice, { once: true, passive: true });
+    document.addEventListener("click", unlockVoice, { once: true });
   }
 
   /* ---- Navigation ---- */

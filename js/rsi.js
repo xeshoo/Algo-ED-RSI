@@ -144,16 +144,16 @@ const RSI = (() => {
         // Update NEXT button state after toggle
         const allNowChecked = DATA.preRSIChecklist.every((item) => checklistState[item.id]);
         $("#rsiNext").disabled = !allNowChecked;
+        // Speak feedback directly in click handler (browser gesture policy)
+        if (allNowChecked) {
+          Voice.speak("All checklist items confirmed. You may proceed.");
+          startTimer();
+        }
       });
     });
 
     // Enable/disable next button
     $("#rsiNext").disabled = !allChecked;
-    if (allChecked) {
-      Voice.speak("All checklist items confirmed. You may proceed.");
-      timestamp("Airway checklist completed — all items confirmed");
-      startTimer();
-    }
   }
 
   /* ---- Decision branch rendering ---- */
