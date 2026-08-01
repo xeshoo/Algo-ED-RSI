@@ -1,0 +1,161 @@
+/* ==========================================================================
+   STYLE.CSS — tokens at top; edit there to retheme.
+   ========================================================================== */
+:root{
+  --navy:#0F2A3D; --navy-deep:#081722;
+  --red:#B4282A; --red-soft:#FBE7E7;
+  --amber:#B4700A; --amber-soft:#FCEEDA;
+  --green:#177047; --green-soft:#E4F3EC;
+  --blue:#1D5D8C; --blue-soft:#E7F0F6;
+  --ink:#10222E; --ink-soft:#516572;
+  --paper:#F4F7F8; --card:#FFFFFF; --line:#DCE4E7;
+  --mono: ui-monospace,"SF Mono","Roboto Mono",Consolas,monospace;
+  --sans: -apple-system,"Roboto","Segoe UI",system-ui,sans-serif;
+  --radius:14px;
+}
+body.dark{
+  --paper:#0B141B; --card:#101E29; --line:#1E323F;
+  --ink:#E7EEF2; --ink-soft:#8CA2AF;
+  --navy:#123047; --navy-deep:#06111A;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);font-family:var(--sans);}
+button,input,select{font-family:inherit;}
+
+/* ---------- app bar ---------- */
+.appbar{
+  position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:8px;
+  background:linear-gradient(180deg,var(--navy),var(--navy-deep));color:#fff;
+  padding:12px 10px;padding-top:calc(12px + env(safe-area-inset-top));
+}
+.appbar h1{flex:1;font-size:16px;margin:0;font-weight:700;text-align:center;}
+.iconbtn{background:rgba(255,255,255,.1);border:none;color:#fff;width:38px;height:38px;border-radius:10px;font-size:16px;}
+
+/* ---------- screens ---------- */
+main#app{max-width:640px;margin:0 auto;padding:14px 12px 90px;}
+.screen{display:none;}
+.screen.active{display:block;}
+
+/* ---------- dashboard ---------- */
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.dash-grid.two-col{grid-template-columns:1fr 1fr;}
+.tile{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 10px;min-height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  font-weight:700;font-size:13.5px;color:var(--ink);
+}
+.tile .tile-ic{font-size:26px;}
+.tile-red{background:var(--red-soft);color:var(--red);}
+.tile-blue{background:var(--blue-soft);color:var(--blue);}
+.tile-amber{background:var(--amber-soft);color:var(--amber);}
+.dash-note{font-size:11.5px;color:var(--ink-soft);text-align:center;margin-top:16px;line-height:1.5;}
+
+/* ---------- cards / generic ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px;}
+.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);margin:0 0 10px;}
+.note{font-size:12.5px;color:var(--ink-soft);line-height:1.5;}
+
+/* ---------- RSI screen ---------- */
+.rsi-timerbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.rsi-clock{
+  font-family:var(--mono);font-size:40px;font-weight:700;color:var(--navy);
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:8px 18px;flex:1;text-align:center;
+}
+.rsi-delta{font-size:12.5px;font-weight:700;color:var(--green);min-width:80px;text-align:right;}
+.rsi-delta.behind{color:var(--red);}
+.rsi-stepcard{background:var(--navy);color:#fff;border-radius:16px;padding:16px;margin-bottom:12px;}
+.rsi-steplabel{font-size:11px;opacity:.65;text-transform:uppercase;letter-spacing:.06em;}
+.rsi-stepname{font-size:24px;font-weight:800;margin:4px 0 10px;letter-spacing:.02em;}
+.progressbar{height:8px;background:rgba(255,255,255,.15);border-radius:6px;overflow:hidden;}
+.progressfill{height:100%;background:#fff;width:0%;transition:width .25s;}
+.rsi-next{font-size:12px;opacity:.7;margin-top:8px;}
+.rsi-stepbody{margin-bottom:14px;}
+
+.rsi-bigbtns{display:flex;gap:10px;margin-bottom:10px;}
+.bigbtn{
+  min-height:58px;border-radius:14px;border:none;font-size:16px;font-weight:800;letter-spacing:.03em;flex:1;
+}
+.bigbtn.primary{background:var(--navy);color:#fff;}
+.bigbtn.ghost{background:var(--card);color:var(--navy);border:2px solid var(--navy);}
+.bigbtn.emergency{width:100%;background:var(--red);color:#fff;margin-bottom:10px;}
+.bigbtn.small{min-height:40px;font-size:13px;flex:none;padding:0 16px;}
+.bigbtn:disabled{opacity:.35;}
+
+.timeline-drawer{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;}
+.timeline-drawer summary{font-weight:700;font-size:13px;cursor:pointer;}
+.timeline-list{margin-top:10px;font-family:var(--mono);font-size:12px;}
+.timeline-list .tl-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line);}
+.timeline-list .tl-row.past{color:var(--ink-soft);}
+.timeline-list .tl-row.current{color:var(--navy);font-weight:800;}
+
+/* ---------- checklists (equipment / confirmation) ---------- */
+.chk-pct{font-family:var(--mono);font-weight:800;font-size:22px;color:var(--navy);text-align:right;}
+ul.chk{list-style:none;margin:0;padding:0;}
+ul.chk li{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px dashed var(--line);font-size:14.5px;min-height:46px;}
+.box{width:22px;height:22px;border-radius:6px;border:2px solid var(--ink-soft);flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;transition:background .15s;}
+li.on .box{background:var(--green);border-color:var(--green);}
+li.on span.label{text-decoration:line-through;color:var(--ink-soft);}
+
+/* ---------- dose tables ---------- */
+.chiprow{display:flex;flex-wrap:wrap;gap:8px;}
+.chip{border:1.5px solid var(--line);background:var(--card);border-radius:20px;padding:8px 14px;font-size:12.5px;font-weight:700;color:var(--ink);}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff;}
+.weight-row{display:flex;align-items:center;gap:8px;}
+.weight-row input, .inline-inputs input, .inline-inputs select{
+  border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:14px;font-family:var(--mono);background:var(--paper);color:var(--ink);
+}
+.weight-row input{width:90px;}
+.inline-inputs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+table.dosetable{width:100%;border-collapse:collapse;font-size:13px;}
+table.dosetable td{padding:8px 4px;border-bottom:1px solid var(--line);vertical-align:top;}
+table.dosetable td.calc{font-family:var(--mono);font-weight:800;color:var(--navy);white-space:nowrap;text-align:right;}
+table.dosetable .sub{display:block;font-size:11px;color:var(--ink-soft);font-weight:400;}
+
+/* ---------- flow (failed airway / cric) ---------- */
+.flow{display:flex;flex-direction:column;align-items:stretch;gap:4px;}
+.flow-step{
+  background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-weight:700;font-size:14px;
+  display:flex;align-items:center;gap:10px;
+}
+.flow-step .n{font-family:var(--mono);color:var(--navy);}
+.flow-arrow{text-align:center;color:var(--ink-soft);font-size:18px;}
+.flow-detail{background:var(--blue-soft);color:var(--navy);border-radius:10px;padding:10px 12px;font-size:12.5px;margin:2px 0 6px;display:none;}
+.flow-detail.open{display:block;}
+.flow-step.critical{background:var(--red-soft);color:var(--red);border-color:#F0C6C6;}
+
+/* attempt / laryngoscopy timer */
+.attempt{text-align:center;background:var(--navy);color:#fff;border-radius:16px;padding:20px;}
+.attempt .n{font-family:var(--mono);font-size:52px;font-weight:800;}
+.attempt.warn{background:var(--red);animation:pulse 1s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.85;}}
+.attempt .lbl{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.06em;}
+.attempt .stop{margin-top:10px;font-size:15px;font-weight:800;display:none;}
+.attempt.warn .stop{display:block;}
+
+/* calculators */
+.result{font-family:var(--mono);font-size:14px;color:var(--navy);font-weight:700;margin-top:6px;line-height:1.6;}
+.chk-mini{display:flex;flex-direction:column;gap:2px;}
+.chk-mini label{display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;}
+
+/* report */
+.report{white-space:pre-wrap;font-family:var(--mono);font-size:12.5px;line-height:1.7;}
+.settingrow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;}
+.settingrow:last-child{border-bottom:none;}
+.switch{width:44px;height:26px;}
+
+/* overlay */
+.overlay{position:fixed;inset:0;background:rgba(8,23,34,.85);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;}
+.overlay-content{background:var(--card);border-radius:16px;padding:22px;max-width:420px;width:100%;text-align:center;}
+.overlay-content h2{color:var(--red);margin-top:0;}
+
+.btnrow{display:flex;gap:8px;}
+.act{border:none;border-radius:10px;padding:11px 14px;font-size:13px;font-weight:700;min-height:44px;flex:1;background:var(--navy);color:#fff;}
+.act.ghost{background:var(--card);color:var(--navy);border:1.5px solid var(--navy);}
+
+/* landscape: shrink dashboard tiles, put RSI bar side by side */
+@media (orientation:landscape) and (max-height:500px){
+  main#app{padding-bottom:20px;}
+  .dash-grid{grid-template-columns:repeat(4,1fr);}
+  .rsi-clock{font-size:28px;padding:6px 10px;}
+  .rsi-stepname{font-size:19px;}
+}
