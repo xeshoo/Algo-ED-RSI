@@ -1,699 +1,204 @@
 /* ==========================================================================
-   DATA.JS — All clinical data, drug info, ventilator presets, LEMON criteria
-   Edit here to change doses, timelines, presets — flows through every screen.
+   DATA.JS — all clinical content lives here.
+   To update a dose, checklist item, or timeline, edit this file only.
+   Nothing in here talks to the DOM; app.js / rsi.js render it.
    ========================================================================== */
 
-"use strict";
-
-const DATA = {
-
-  /* ---------- LEMON difficult airway assessment ---------- */
-  lemon: {
-    external: [
-      { id: "large_tongue",    label: "Large tongue" },
-      { id: "short_neck",      label: "Short, thick neck" },
-      { id: "limited_mouth",   label: "Limited mouth opening (<3 cm)" },
-      { id: "dentition",       label: "Poor dentition / prominent incisors" },
-      { id: "facial_hair",     label: "Facial hair (beard)" },
-      { id: "obesity",         label: "Obesity (BMI >30)" },
-    ],
-    look: [
-      { id: "mallampati_3_4",  label: "Mallampati III–IV" },
-      { id: "macroglossia",    label: "Macroglossia" },
-      { id: "uvula",           label: "Uvula not visible" },
-    ],
-    evaluate_3_3: [
-      { id: "interincisor",    label: "Inter-incisor distance <3 finger-breadths" },
-      { id: "thyromental",     label: "Thyromental distance <3 finger-breadths" },
-    ],
-    mallampati: [
-      { id: "mallampati",      label: "Mallampati class ≥III" },
-    ],
-    neck: [
-      { id: "neck_mobility",   label: "Limited neck mobility (cervical collar, arthritis)" },
-    ],
-    obstruction: [
-      { id: "airway_obstruction", label: "Airway obstruction (tumor, epiglottitis, trauma)" },
-      { id: "stridor",           label: "Stridor at rest" },
-    ],
-    scoring: {
-      green: { max: 1, label: "Low risk", rec: "Standard RSI approach", color: "green" },
-      amber: { min: 2, max: 3, label: "Moderate risk", rec: "Senior review — consider video laryngoscopy, awake look", color: "amber" },
-      red:   { min: 4, max: 99, label: "High risk", rec: "Awake airway strategy — consider fiberoptic / surgical standby", color: "red" },
-    },
-  },
-
-  /* ---------- Pre-RSI checklist (challenge-response) ---------- */
-  preRSIChecklist: [
-    { id: "monitor",    label: "Monitoring attached?",           icon: "📊" },
-    { id: "suction",    label: "Suction on & working?",          icon: "🫧" },
-    { id: "oxygen",     label: "Oxygen pre-oxygenating?",        icon: "💨" },
-    { id: "bougie",     label: "Bougie / stylet ready?",         icon: "🔧" },
-    { id: "cric_kit",   label: "Cricothyrotomy kit at bedside?", icon: "🔪" },
-    { id: "drugs",      label: "All drugs drawn up?",            icon: "💉" },
-    { id: "capno",      label: "Capnography connected?",         icon: "📈" },
-    { id: "assistant",  label: "Assistant briefed & ready?",     icon: "👤" },
-    { id: "plan_b",     label: "Plan B discussed?",              icon: "📋" },
-    { id: "position",   label: "Patient positioned (ear-to-sternal notch)?", icon: "🛏️" },
-  ],
-
-  /* ---------- RSI workflow steps with branching ---------- */
-  rsiSteps: {
-    adult: [
-      {
-        id: "preparation",
-        name: "Preparation",
-        checklist: true,  // gates on preRSIChecklist
-        content: "Complete the airway checklist before proceeding.",
-      },
-      {
-        id: "preoxygenation",
-        name: "Pre-oxygenation",
-        content: "3 minutes of 100% O₂ via NRB, or 8 vital capacity breaths.",
-        decision: {
-          question: "Is pre-oxygenation adequate? (SpO₂ ≥95%, end-tidal O₂ ≥90%)",
-          yes: { next: "induction", label: "Yes — Continue RSI" },
-          no: {
-            label: "No — Inadequate",
-            branches: [
-              { id: "niv", label: "Try NIV (CPAP/BiPAP)", next: "induction", note: "Reassess SpO₂ after 2 min NIV" },
-              { id: "bvm", label: "BVM ventilation", next: "induction", note: "Two-person BVM with OPA/NPA" },
-              { id: "dsi", label: "Delayed Sequence Intubation", next: "induction", note: "Ketamine sedation for toleration of pre-oxygenation" },
-            ],
-          },
-        },
-      },
-      {
-        id: "induction",
-        name: "Induction & Paralysis",
-        drugChoice: true,
-        content: "Push sedative agent, wait for onset (loss of eyelash reflex), then push paralytic.",
-        drugSequence: ["sedative", "paralytic"],
-      },
-      {
-        id: "wait_paralysis",
-        name: "Wait for Paralysis",
-        timer: { duration: 60, label: "Wait for optimal intubating conditions" },
-        content: "Monitor for fasciculations to cease. Do NOT attempt laryngoscopy until paralysis is optimal.",
-      },
-      {
-        id: "laryngoscopy",
-        name: "Laryngoscopy",
-        content: "Insert laryngoscope, visualize cords. Record Cormack-Lehane grade.",
-        attemptTracking: true,
-        fields: [
-          { id: "cl_grade", label: "Cormack-Lehane Grade", type: "select", options: ["I", "II", "III", "IV"] },
-          { id: "view_pct", label: "% Glottic Opening (POGO)", type: "number", suffix: "%" },
-          { id: "bougie_used", label: "Bougie used?", type: "toggle" },
-        ],
-      },
-      {
-        id: "intubation",
-        name: "Endotracheal Intubation",
-        content: "Insert ETT, inflate cuff, confirm placement immediately.",
-        fields: [
-          { id: "ett_size", label: "ETT size (mm)", type: "number" },
-          { id: "ett_depth", label: "ETT depth (cm at teeth)", type: "number" },
-        ],
-      },
-      {
-        id: "confirmation",
-        name: "Tube Confirmation",
-        content: "Confirm ETT placement using the hierarchy below. Capnography is the gold standard.",
-        confirmSteps: [
-          { id: "etco2",       label: "Continuous waveform ETCO₂ (gold standard)", primary: true },
-          { id: "chest_rise",  label: "Bilateral chest rise" },
-          { id: "breath_sounds", label: "Bilateral breath sounds" },
-          { id: "no_epigastric", label: "No epigastric sounds" },
-          { id: "tube_depth",  label: "Tube depth appropriate" },
-          { id: "cxr",         label: "Chest X-ray ordered (later confirmation)" },
-        ],
-      },
-      {
-        id: "post_intubation",
-        name: "Post-Intubation",
-        content: "Secure tube, connect to ventilator, start sedation infusion, order CXR.",
-        postIntubation: true,
-      },
-    ],
-    child: [
-      {
-        id: "preparation",
-        name: "Preparation",
-        checklist: true,
-        content: "Complete the airway checklist. Verify weight-based dosing. Have uncuffed AND cuffed ETT ready.",
-      },
-      {
-        id: "preoxygenation",
-        name: "Pre-oxygenation",
-        content: "3 minutes of 100% O₂. Use appropriately sized face mask. Avoid gastric insufflation.",
-        decision: {
-          question: "Is pre-oxygenation adequate?",
-          yes: { next: "induction", label: "Yes — Continue" },
-          no: {
-            label: "No — Inadequate",
-            branches: [
-              { id: "bvm_ped", label: "BVM with PEEP valve", next: "induction" },
-              { id: "niv_ped", label: "NIV trial", next: "induction" },
-            ],
-          },
-        },
-      },
-      {
-        id: "induction",
-        name: "Induction & Paralysis",
-        drugChoice: true,
-        content: "Weight-based dosing. Atropine pretreatment recommended <1 year or if succinylcholine used.",
-        drugSequence: ["atropine_optional", "sedative", "paralytic"],
-      },
-      {
-        id: "wait_paralysis",
-        name: "Wait for Paralysis",
-        timer: { duration: 60, label: "Wait for optimal conditions" },
-        content: "Pediatric onset may be slightly faster. Monitor for fasciculations.",
-      },
-      {
-        id: "laryngoscopy",
-        name: "Laryngoscopy",
-        content: "Straight blade (Miller) preferred <2 years. Cuffed ETT acceptable from term neonate.",
-        attemptTracking: true,
-        fields: [
-          { id: "cl_grade", label: "Cormack-Lehane Grade", type: "select", options: ["I", "II", "III", "IV"] },
-          { id: "bougie_used", label: "Bougie used?", type: "toggle" },
-        ],
-      },
-      {
-        id: "intubation",
-        name: "ET Intubation",
-        content: "Insert ETT, inflate cuff gently if cuffed. Confirm placement.",
-        fields: [
-          { id: "ett_size", label: "ETT size (mm)", type: "number" },
-          { id: "ett_depth", label: "ETT depth (cm at lip)", type: "number" },
-        ],
-      },
-      {
-        id: "confirmation",
-        name: "Tube Confirmation",
-        content: "Same confirmation hierarchy. ETCO₂ is essential.",
-        confirmSteps: [
-          { id: "etco2",       label: "Continuous waveform ETCO₂", primary: true },
-          { id: "chest_rise",  label: "Bilateral chest rise" },
-          { id: "breath_sounds", label: "Bilateral breath sounds" },
-          { id: "no_epigastric", label: "No epigastric sounds" },
-          { id: "tube_depth",  label: "Tube depth appropriate" },
-          { id: "cxr",         label: "Chest X-ray ordered" },
-        ],
-      },
-      {
-        id: "post_intubation",
-        name: "Post-Intubation",
-        content: "Secure tube, connect to ventilator, sedation infusion, CXR.",
-        postIntubation: true,
-      },
-    ],
-  },
-
-  /* ---------- Drugs with enhanced info ---------- */
-  drugs: {
-    sedative: {
-      label: "Sedatives / Induction Agents",
-      agents: [
-        {
-          id: "ketamine",
-          name: "Ketamine",
-          dosePerKg: { adult: 1.5, child: 2 },
-          unit: "mg",
-          route: "IV",
-          onset: "30 seconds",
-          duration: "10–15 min",
-          maxDose: 150,
-          contraindications: [
-            "Uncontrolled hypertension",
-            "Aortic dissection",
-            "Severe ischemic heart disease",
-            "Raised intracranial pressure (relative)",
-            "Known hypersensitivity",
-          ],
-          warnings: "Increases HR, BP, secretions. Consider glycopyrrolate for secretions. Emergence reactions reduced with benzodiazepine co-administration.",
-          category: "dissociative",
-        },
-        {
-          id: "propofol",
-          name: "Propofol",
-          dosePerKg: { adult: 1.5, child: 2.5 },
-          unit: "mg",
-          route: "IV",
-          onset: "15–30 seconds",
-          duration: "5–10 min",
-          maxDose: 200,
-          contraindications: [
-            "Hemodynamic instability",
-            "Egg/soy allergy (some formulations)",
-            "Severe hypovolemia",
-          ],
-          warnings: "Causes hypotension — reduce dose in elderly, shocked patients. No analgesic effect. Consider co-induction with fentanyl.",
-          category: "sedative-hypnotic",
-        },
-        {
-          id: "etomidate",
-          name: "Etomidate",
-          dosePerKg: { adult: 0.3, child: 0.3 },
-          unit: "mg",
-          route: "IV",
-          onset: "15–30 seconds",
-          duration: "3–5 min",
-          maxDose: 30,
-          contraindications: [
-            "Known hypersensitivity",
-            "Adrenal insufficiency (relative — single dose generally safe)",
-          ],
-          warnings: "Hemodynamically neutral — good for shocked patients. Single dose only (adrenal suppression with repeated doses). Myoclonus common — pretreat with fentanyl to reduce.",
-          category: "sedative-hypnotic",
-        },
-        {
-          id: "midazolam",
-          name: "Midazolam",
-          dosePerKg: { adult: 0.1, child: 0.1 },
-          unit: "mg",
-          route: "IV",
-          onset: "30–60 seconds",
-          duration: "15–30 min",
-          maxDose: 10,
-          contraindications: [
-            "Severe respiratory depression (without ventilation support)",
-            "Acute narrow-angle glaucoma",
-          ],
-          warnings: "Weaker induction agent — often used as co-induction. Dose reduce in elderly, hepatic impairment. Flumazenil is reversal agent.",
-          category: "benzodiazepine",
-        },
-        {
-          id: "fentanyl",
-          name: "Fentanyl",
-          dosePerKg: { adult: 1.5, child: 1.5 },
-          unit: "mcg",
-          route: "IV",
-          onset: "30–60 seconds",
-          duration: "30–60 min",
-          maxDose: 150,
-          contraindications: [
-            "Known hypersensitivity",
-            "Severe respiratory depression (without ventilation)",
-          ],
-          warnings: "Use as co-induction agent (blunts sympathetic response). Can cause chest wall rigidity at high doses. Respiratory depression — ensure ventilation capability.",
-          category: "opioid",
-        },
-      ],
-    },
-    paralytic: {
-      label: "Neuromuscular Blockers",
-      agents: [
-        {
-          id: "rocuronium",
-          name: "Rocuronium",
-          dosePerKg: { adult: 1.2, child: 1.2 },
-          unit: "mg",
-          route: "IV",
-          onset: "45–60 seconds",
-          duration: "45–70 min",
-          maxDose: 120,
-          contraindications: [
-            "Known hypersensitivity",
-          ],
-          warnings: "First-line paralytic for RSI. Sugammadex provides complete reversal (16 mg/kg). Prefer over succinylcholine in most situations.",
-          category: "non-depolarizing",
-        },
-        {
-          id: "succinylcholine",
-          name: "Succinylcholine",
-          dosePerKg: { adult: 1.5, child: 2 },
-          unit: "mg",
-          route: "IV",
-          onset: "30–60 seconds",
-          duration: "5–10 min",
-          maxDose: 150,
-          contraindications: [
-            "Hyperkalemia (K⁺ >5.5)",
-            "Burns >24 hours old",
-            "Crush injury >24 hours old",
-            "Denervation injury >24 hours old",
-            "Prolonged immobilization",
-            "Personal/family history of malignant hyperthermia",
-            "Myopathy / muscular dystrophy",
-            "Penetrating eye injury (relative)",
-          ],
-          warnings: "Fasciculations common — pretreat with rocuronium 0.06 mg/kg (defasciculating dose). Risk of hyperkalemia in susceptible patients. Short duration — have repeat dose or alternative ready if first attempt fails.",
-          category: "depolarizing",
-        },
-      ],
-    },
-    atropine_optional: {
-      label: "Atropine (Pediatric Pretreatment)",
-      agents: [
-        {
-          id: "atropine",
-          name: "Atropine",
-          dosePerKg: { adult: 0, child: 0.02 },
-          unit: "mg",
-          route: "IV",
-          onset: "1–2 min",
-          duration: "30–60 min",
-          maxDose: 0.5,
-          minDose: 0.1,
-          contraindications: [
-            "Known hypersensitivity",
-          ],
-          warnings: "Recommended for children <1 year, or when succinylcholine used. Prevents bradycardia. Minimum dose 0.1 mg.",
-          category: "anticholinergic",
-        },
-      ],
-    },
-    post_intubation: {
-      label: "Post-Intubation Infusions",
-      agents: [
-        {
-          id: "propofol_inf",
-          name: "Propofol infusion",
-          doseRange: "5–50 mcg/kg/min",
-          onset: "Immediate",
-          duration: "Short-acting",
-          contraindications: ["Hemodynamic instability", "Propofol infusion syndrome (prolonged high-dose >48h)"],
-          warnings: "Titrate to RASS target. Monitor triglycerides if >48h. Consider enteral sedation to wean.",
-          category: "sedative",
-        },
-        {
-          id: "midazolam_inf",
-          name: "Midazolam infusion",
-          doseRange: "0.02–0.1 mg/kg/hr",
-          onset: "1–3 min",
-          duration: "Short-acting",
-          contraindications: ["Severe hepatic impairment"],
-          warnings: "Accumulates with prolonged use — consider daily sedation vacation. Renal/hepatic dose adjustment.",
-          category: "benzodiazepine",
-        },
-        {
-          id: "fentanyl_inf",
-          name: "Fentanyl infusion",
-          doseRange: "25–100 mcg/hr",
-          onset: "Immediate",
-          duration: "Short-acting",
-          contraindications: ["Opioid sensitivity"],
-          warnings: "For analgesia. Ensure sedation covers pain. Consider multimodal analgesia.",
-          category: "opioid",
-        },
-        {
-          id: "cisatracurium_inf",
-          name: "Cisatracurium infusion",
-          doseRange: "1–3 mcg/kg/min",
-          onset: "2–3 min",
-          duration: "Intermediate",
-          contraindications: ["Known hypersensitivity"],
-          warnings: "Only for ventilator dyssynchrony not resolved by sedation. Train-of-four monitoring required. Daily interruption recommended.",
-          category: "paralytic",
-        },
-      ],
-    },
-  },
-
-  /* ---------- Failed airway algorithm (decision tree) ---------- */
-  failedAirway: {
-    root: {
-      id: "cannot_intubate",
-      question: "Cannot Intubate",
-      children: [
-        {
-          id: "can_oxygenate",
-          question: "Can you oxygenate? (SpO₂ >90%)",
-          yes: {
-            id: "ci_co_yes",
-            label: "YES — CICO resolved",
-            action: "Supraglottic airway (LMA/i-gel)",
-            steps: [
-              "Insert supraglottic airway (LMA / i-gel)",
-              "Confirm ventilation with ETCO₂",
-              "If effective: use as bridge — plan definitive airway",
-              "If ineffective: reposition, try second SGA",
-              "If still ineffective: treat as CICO",
-            ],
-            outcome: "green",
-          },
-          no: {
-            id: "ci_co_no",
-            label: "NO — CICO (Cannot Intubate, Cannot Oxygenate)",
-            action: "Emergency front-of-neck access",
-            steps: [
-              "Declare: 'CICO — proceeding to surgical cricothyrotomy'",
-              "Position: extend neck, identify cricothyroid membrane",
-              "Stabilize larynx with non-dominant hand",
-              "Horizontal skin incision through membrane",
-              "Dilate with forceps or bougie-guided technique",
-              "Insert 6.0 cuffed ETT or tracheostomy tube",
-              "Confirm with ETCO₂",
-              "Ventilate and secure",
-            ],
-            checklist: [
-              { id: "scalpel", label: "Scalpel (#10 or #20 blade)" },
-              { id: "bougie_cric", label: "Bougie" },
-              { id: "ett_6", label: "6.0 ETT or tracheostomy tube" },
-              { id: "syringe", label: "10 mL syringe" },
-              { id: "connector", label: "ETT connector / adapter" },
-            ],
-            outcome: "red",
-          },
-        },
-      ],
-    },
-  },
-
-  /* ---------- Ventilator presets (evidence-based) ---------- */
-  ventilatorPresets: [
-    {
-      id: "ards",
-      name: "ARDS",
-      subtitle: "Acute Respiratory Distress Syndrome",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6 mL/kg IBP (lung protective)",
-        RR: "20–30 bpm",
-        PEEP: "10–15 cmH₂O (per ARDSNet table)",
-        "FiO₂": "Titrate to SpO₂ 88–95%",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min (square waveform)",
-        ie_ratio: "1:1.5–1:2",
-        plateau: "≤30 cmH₂O target",
-      },
-      notes: "Prone positioning if P/F <150. Neuromuscular blockade if P/F <150 in first 48h. Conservative fluid strategy.",
-    },
-    {
-      id: "asthma",
-      name: "Asthma",
-      subtitle: "Status asthmaticus / bronchospasm",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6–8 mL/kg IBP",
-        RR: "10–14 bpm (allow permissive hypercapnia)",
-        PEEP: "0–5 cmH₂O (auto-PEEP risk)",
-        "FiO₂": "Titrate to SpO₂ >92%",
-        trigger: "Flow trigger 2 L/min",
-        inspiratory_flow: "80–100 L/min (high flow for short I-time)",
-        ie_ratio: "1:3–1:4 (long expiration)",
-        plateau: "Monitor for auto-PEEP",
-      },
-      notes: "Permissive hypercapnia acceptable. Avoid auto-PEEP — disconnect and decompress if dynamic hyperinflation. Bronchodilators IV and inhaled.",
-    },
-    {
-      id: "copd",
-      name: "COPD",
-      subtitle: "Acute exacerbation / acute-on-chronic",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6–8 mL/kg IBP",
-        RR: "12–16 bpm",
-        PEEP: "5–8 cmH₂O (match auto-PEEP)",
-        "FiO₂": "Titrate to SpO₂ 88–92% (avoid over-oxygenation)",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2.5–1:3",
-        plateau: "Monitor for auto-PEEP",
-      },
-      notes: "Target permissive hypoxemia (88–92%). Watch for auto-PEEP. Bicarbonate infusion if pH <7.2.",
-    },
-    {
-      id: "tbi",
-      name: "TBI",
-      subtitle: "Traumatic Brain Injury",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6–8 mL/kg IBP",
-        RR: "16–20 bpm (target PaCO₂ 35–40 mmHg)",
-        PEEP: "5–8 cmH₂O",
-        "FiO₂": "Titrate to SpO₂ >95%, PaO₂ >100 mmHg",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2",
-        plateau: "≤30 cmH₂O",
-      },
-      notes: "Head of bed ≥30°. Avoid hypoxia and hypotension (SBP >100 mmHg). ICP management per neuro protocol. Avoid hyperthermia.",
-    },
-    {
-      id: "pulm_edema",
-      name: "Pulmonary Edema",
-      subtitle: "Cardiogenic / fluid overload",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6–8 mL/kg IBP",
-        RR: "16–20 bpm",
-        PEEP: "8–15 cmH₂O (therapeutic PEEP)",
-        "FiO₂": "Titrate to SpO₂ >92%",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2",
-        plateau: "≤30 cmH₂O",
-      },
-      notes: "Therapeutic PEEP reduces preload and afterload. Diuresis. Consider nitroglycerin. Monitor hemodynamics closely with PEEP changes.",
-    },
-    {
-      id: "dka",
-      name: "DKA",
-      subtitle: "Diabetic Ketoacidosis",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6–8 mL/kg IBP",
-        RR: "16–20 bpm (may need higher to compensate metabolic acidosis)",
-        PEEP: "5 cmH₂O",
-        "FiO₂": "Titrate to SpO₂ >94%",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2",
-        plateau: "≤30 cmH₂O",
-      },
-      notes: "Match pre-intubation respiratory rate (patient was compensating). Aggressive fluid resuscitation. Insulin infusion. Monitor potassium closely.",
-    },
-    {
-      id: "post_rosc",
-      name: "Post-ROSC",
-      subtitle: "After return of spontaneous circulation",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6 mL/kg IBP",
-        RR: "10–12 bpm",
-        PEEP: "5–8 cmH₂O",
-        "FiO₂": "Titrate to SpO₂ 94–98% (avoid hyperoxia)",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2",
-        plateau: "≤30 cmH₂O",
-      },
-      notes: "Avoid hyperoxia (aim SpO₂ 94–98%). Avoid hyperventilation. Targeted temperature management (32–36°C). Hemodynamic support.",
-    },
-    {
-      id: "hyperkalemia_arrest",
-      name: "Hyperkalemia Arrest",
-      subtitle: "Cardiac arrest secondary to hyperkalemia",
-      params: {
-        mode: "Volume Control (AC/VC)",
-        TV: "6 mL/kg IBP",
-        RR: "10–12 bpm",
-        PEEP: "5 cmH₂O",
-        "FiO₂": "100% during arrest",
-        trigger: "Flow trigger 1–2 L/min",
-        inspiratory_flow: "60 L/min",
-        ie_ratio: "1:2",
-        plateau: "≤30 cmH₂O",
-      },
-      notes: "Treat K⁺: Calcium chloride 10% 10mL IV, Insulin 10U + D50 50mL, Saline bolus, Sodium bicarbonate 50mL (8.4%), Nebulized salbutamol. Continue CPR.",
-    },
-  ],
-
-  /* ---------- Tube confirmation hierarchy ---------- */
-  tubeConfirmation: [
-    { id: "etco2",       label: "Continuous waveform ETCO₂",   icon: "📈", primary: true, note: "Gold standard — 6 consecutive waveforms" },
-    { id: "chest_rise",  label: "Bilateral chest rise",        icon: "🫁", primary: false },
-    { id: "breath_sounds", label: "Bilateral breath sounds",   icon: "👂", primary: false },
-    { id: "no_epigastric", label: "No epigastric sounds",      icon: "✅", primary: false },
-    { id: "tube_depth",  label: "Tube depth at teeth/lip",     icon: "📏", primary: false },
-    { id: "fogging",     label: "Fogging in tube",             icon: "💨", primary: false },
-    { id: "cxr",         label: "Chest X-ray (later)",         icon: "📷", primary: false, note: "Ordered — not for immediate confirmation" },
-  ],
-
-  /* ---------- Tube size defaults ---------- */
-  tubeDefaults: {
-    adult: { male: { size: 8.0, depth: 22 }, female: { size: 7.0, depth: 20 } },
-    child_formula: "Age/4 + 4",
-    depth_formula: "Size × 3",
-  },
-
-  /* ---------- LMA sizes ---------- */
-  lmaSizes: [
-    { weight: "<5 kg",    size: "1", blade: "—" },
-    { weight: "5–10 kg",  size: "1.5", blade: "—" },
-    { weight: "10–20 kg", size: "2", blade: "—" },
-    { weight: "20–30 kg", size: "2.5", blade: "—" },
-    { weight: "30–50 kg", size: "3", blade: "—" },
-    { weight: "50–70 kg", size: "4", blade: "—" },
-    { weight: "70–100 kg", size: "5", blade: "—" },
-    { weight: ">100 kg",  size: "5", blade: "—" },
-  ],
-
-  /* ---------- Vasopressor infusion rates ---------- */
-  vasopressors: [
-    { id: "norepinephrine", name: "Norepinephrine", conc: 0.004, unit: "mg/mL", defaultConc: "4 mg/250 mL", rates: [
-      { label: "Low", dose: 0.05 },
-      { label: "Medium", dose: 0.1 },
-      { label: "High", dose: 0.2 },
-      { label: "Max", dose: 0.5 },
-    ]},
-    { id: "epinephrine", name: "Epinephrine", conc: 0.016, unit: "mg/mL", defaultConc: "4 mg/250 mL", rates: [
-      { label: "Low", dose: 0.01 },
-      { label: "Medium", dose: 0.05 },
-      { label: "High", dose: 0.1 },
-      { label: "Max", dose: 0.5 },
-    ]},
-    { id: "dopamine", name: "Dopamine", conc: 1.6, unit: "mg/mL", defaultConc: "400 mg/250 mL", rates: [
-      { label: "Renal", dose: 2 },
-      { label: "Cardiac", dose: 5 },
-      { label: "Pressor", dose: 10 },
-      { label: "Max", dose: 20 },
-    ]},
-    { id: "phenylephrine", name: "Phenylephrine", conc: 0.1, unit: "mg/mL", defaultConc: "20 mg/200 mL", rates: [
-      { label: "Low", dose: 0.5 },
-      { label: "Medium", dose: 1 },
-      { label: "High", dose: 2 },
-      { label: "Max", dose: 5 },
-    ]},
-    { id: "vasopressin", name: "Vasopressin", conc: 0.02, unit: "U/mL", defaultConc: "20 U/1000 mL", rates: [
-      { label: "Fixed", dose: 0.04 },
-    ]},
-  ],
-
-  /* ---------- Patient categories for dosing ---------- */
-  patientCategories: [
-    { id: "adult",       label: "Adult",       note: "Standard adult dosing" },
-    { id: "obese",       label: "Obese",       note: "Dose to IBW unless noted" },
-    { id: "elderly",     label: "Elderly (>65)", note: "Reduce sedatives 25–50%" },
-    { id: "pediatric",   label: "Pediatric",   note: "Weight-based dosing" },
-    { id: "neonate",     label: "Neonate",     note: "<28 days — special dosing" },
-  ],
-
-  /* ---------- Report template ---------- */
-  reportTemplate: {
-    title: "Rapid Sequence Intubation — Procedure Report",
-    sections: [
-      { id: "indication", label: "Indication" },
-      { id: "airway_assessment", label: "Airway Assessment" },
-      { id: "lemon_score", label: "LEMON Score" },
-      { id: "preoxygenation", label: "Pre-oxygenation" },
-      { id: "drugs", label: "Drugs Administered" },
-      { id: "timeline", label: "Timeline" },
-      { id: "attempts", label: "Laryngoscopy Attempts" },
-      { id: "cl_grade", label: "Cormack-Lehane Grade" },
-      { id: "bougie", label: "Bougie Used" },
-      { id: "tube", label: "Tube Details" },
-      { id: "confirmation", label: "Tube Confirmation" },
-      { id: "complications", label: "Complications" },
-      { id: "operator", label: "Operator" },
-      { id: "assistant", label: "Assistant" },
-      { id: "ventilator", label: "Ventilator Settings" },
-      { id: "sedation", label: "Post-Intubation Sedation" },
-    ],
-  },
+const CATEGORIES = {
+  adult:   { label: "Adult",        note: "Standard adult RSI dosing." },
+  child:   { label: "Pediatric",    note: "Weight-based dosing — confirm with Broselow tape if available." },
+  pregnant:{ label: "Pregnant",     note: "Left lateral tilt 15°, pre-oxygenate longer, expect faster desaturation, avoid prolonged apnea." },
+  shock:   { label: "Shock / hemodynamically unstable", note: "Reduce induction doses ~50%. Prefer ketamine. Have push-dose pressor ready." },
+  asthma:  { label: "Severe asthma / bronchospasm", note: "Ketamine preferred (bronchodilator). Permissive hypercapnia post-intubation." },
+  head:    { label: "Head injury / raised ICP", note: "Avoid hypotension and hypoxia. Consider lidocaine pretreatment. Etomidate or ketamine both reasonable." }
 };
+
+/* ---- Sedative / induction agents (dose = mg/kg unless noted) ---- */
+const SEDATIVES = [
+  { id:"ketamine",  name:"Ketamine",  dose:2,    unit:"mg/kg IV", onset:"~30s", duration:"10–15 min",
+    note:"Preferred in shock, asthma, hemodynamic instability.", bestFor:["shock","asthma","head"],
+    avoid:["Uncontrolled hypertension","Aortic dissection","Severe ischemic heart disease","Known psychosis (relative)"] },
+  { id:"midazolam", name:"Midazolam", dose:0.175, range:"0.15–0.2", unit:"mg/kg IV", onset:"60–90s", duration:"15–30 min",
+    note:"Reduce dose in elderly / critically ill.", avoid:["Hemodynamic instability (causes hypotension)"] },
+  { id:"etomidate", name:"Etomidate", dose:0.3,  unit:"mg/kg IV", onset:"15–45s", duration:"3–12 min",
+    note:"Hemodynamically neutral; avoid in septic shock (adrenal suppression) if alternatives exist.", bestFor:["head"],
+    avoid:["Septic shock / adrenal insufficiency (relative)"] },
+  { id:"propofol",  name:"Propofol",  dose:1.5,  range:"1–2.5", unit:"mg/kg IV", onset:"15–45s", duration:"5–10 min",
+    note:"Causes hypotension — use cautiously in shock.", avoid:["Hemodynamic instability","Egg/soy allergy (formulation-dependent)"] }
+];
+
+/* ---- Neuromuscular blockers ---- */
+const NMB = [
+  { id:"sux", name:"Succinylcholine", dose:1.5, unit:"mg/kg IV (adult)", pedDose:2, pedUnit:"mg/kg IV (infant)", onset:"45–60s", duration:"6–10 min",
+    avoid:["Hyperkalaemia (e.g. renal failure)","Organophosphate poisoning","Delayed severe burns (>24h)","Prolonged crush injury","Personal/family history of malignant hyperthermia","Neuromuscular disease (denervation, myopathy)"] },
+  { id:"roc", name:"Rocuronium", dose:1.2, unit:"mg/kg IV", onset:"~60s", duration:"20–35 min",
+    note:"Preferred nondepolarizer for ED RSI; reversible with sugammadex.", avoid:["Known rocuronium/NMB anaphylaxis"] }
+];
+
+/* ---- Post-intubation sedation / analgesia infusions (per kg per hour) ---- */
+const SEDATION_INFUSIONS = [
+  { id:"morphine",  name:"Morphine",       dose:0.25,  range:"0.1–0.4",  unit:"mg/kg/hr" },
+  { id:"ketamine2", name:"Ketamine",       dose:0.225, range:"0.05–0.4", unit:"mg/kg/hr" },
+  { id:"midazolam2",name:"Midazolam",      dose:0.06,  range:"0.02–0.1", unit:"mg/kg/hr" },
+  { id:"dex",       name:"Dexmedetomidine",dose:0.45,  range:"0.2–0.7",  unit:"µg/kg/hr" },
+  { id:"propofol2", name:"Propofol",       dose:50,    range:"25–75",    unit:"µg/kg/min" },
+  { id:"fentanyl",  name:"Fentanyl",       dose:1.25,  range:"0.5–2",    unit:"µg/kg/hr" }
+];
+
+/* ---- Vasopressor infusion starting rates (mcg/kg/min unless noted) ---- */
+const VASOPRESSORS = [
+  { id:"norepi",  name:"Norepinephrine", dose:0.05, range:"0.01–3",  unit:"µg/kg/min" },
+  { id:"epi",     name:"Epinephrine",    dose:0.05, range:"0.01–1",  unit:"µg/kg/min" },
+  { id:"pheno",   name:"Phenylephrine",  dose:0.5,  range:"0.1–5",   unit:"µg/kg/min" },
+  { id:"vaso",    name:"Vasopressin",    dose:0.04, range:"0.01–0.1",unit:"units/min", fixed:true }
+];
+
+/* ---- Ideal RSI timeline (seconds from case start) — used for the smart timeline ---- */
+const IDEAL_TIMELINE = [
+  { t:0,   label:"Start" },
+  { t:30,  label:"LEMON assessment" },
+  { t:90,  label:"Equipment check" },
+  { t:270, label:"Oxygenation complete" },
+  { t:300, label:"Induction" },
+  { t:315, label:"Paralytic" },
+  { t:375, label:"Laryngoscopy" },
+  { t:405, label:"ET tube placed" },
+  { t:420, label:"ETCO₂ confirmed" },
+  { t:450, label:"Tube secured" }
+];
+
+/* ---- RSI workflow steps (drive the main step screen + progress bar) ----
+   "gate:true" means the app will not allow NEXT until the step's completion
+   condition is met (see rsi.js isStepComplete). ---- */
+const RSI_STEPS = [
+  { id:"lemon",    label:"Airway assessment (LEMON)", voice:"Assess for a difficult airway.", gate:false },
+  { id:"equip",    label:"Equipment check",           voice:"Check your airway equipment before proceeding.", gate:true },
+  { id:"preox",    label:"Preoxygenation",            voice:"Begin preoxygenation.", gate:false },
+  { id:"position", label:"Position",                  voice:"Position the patient.", gate:false },
+  { id:"induction",label:"Induction",                 voice:"Administer induction drug.", gate:false },
+  { id:"paralytic",label:"Paralytic",                 voice:"Administer paralytic.", gate:false },
+  { id:"waiting",  label:"Waiting for paralysis",      voice:"Waiting for paralysis.", gate:false },
+  { id:"laryngoscopy",label:"Laryngoscopy",           voice:"Laryngoscopy now.", gate:false },
+  { id:"confirm",  label:"Confirm tube placement",     voice:"Confirm waveform capnography.", gate:true },
+  { id:"secure",   label:"Secure & document",          voice:"Secure the tube and document.", gate:false }
+];
+
+/* ---- LEMON — scored, 1 point each, drives a traffic-light recommendation ---- */
+const LEMON_ITEMS = [
+  "Look — external markers of difficult airway (facial trauma, large incisors, beard, large tongue)",
+  "Evaluate 3-3-2 — mouth opening <3 fingers, hyoid-chin <3 fingers, thyroid-hyoid <2 fingers",
+  "Mallampati score ≥ 3",
+  "Obstruction / obesity",
+  "Neck mobility reduced"
+];
+function lemonRecommendation(score){
+  if(score <= 1) return { tier:"green",  label:"Standard RSI",        text:"Low predicted difficulty. Proceed with standard RSI plan." };
+  if(score <= 3) return { tier:"amber",  label:"Senior review",       text:"Moderate difficulty predicted. Call for a senior/experienced airway operator before proceeding if time allows." };
+  return              { tier:"red",    label:"Awake airway strategy", text:"High difficulty predicted. Strongly consider an awake technique, video laryngoscopy, and having a surgical airway operator/kit immediately available." };
+}
+
+/* ---- Mandatory challenge-response equipment checklist (gates progression) ---- */
+const EQUIPMENT_CHECKLIST = [
+  "Monitor — ECG, SpO2, BP", "Suction", "Oxygen source & delivery device", "Bougie",
+  "Cric kit", "Drugs drawn up & labelled", "Capnography", "Assistant present"
+];
+
+/* ---- Tube confirmation checklist — order reflects priority (capnography primary) ---- */
+const CONFIRMATION_CHECKLIST = [
+  { label:"Waveform ETCO₂ present (35–45mmHg)", primary:true },
+  { label:"Bilateral chest rise" },
+  { label:"Bilateral breath sounds on auscultation" },
+  { label:"No epigastric / gastric insufflation sounds" },
+  { label:"Tube secured at correct depth" }
+];
+
+/* ---- Failed airway — branching decision tree ----
+   Each node: id, label, detail, and either `next` (single) or `branch` (choices).
+   app.js walks this as a state machine instead of a flat list. ---- */
+const FAILED_AIRWAY_TREE = {
+  start: "cannotIntubate",
+  nodes: {
+    cannotIntubate: {
+      label: "Cannot intubate",
+      detail: "First laryngoscopy attempt unsuccessful or predicted to fail.",
+      branch: [
+        { label:"Optimize & re-attempt (bougie / different blade)", to:"reattempt" },
+        { label:"Can't oxygenate — go straight to escalation", to:"canOxygenate" }
+      ]
+    },
+    reattempt: {
+      label:"Attempt 2 (optimized)",
+      detail:"Change position, blade, or operator. Use a bougie. Maximum 2 attempts by the same operator. Do not exceed 30s per attempt.",
+      branch: [
+        { label:"Successful", to:"success" },
+        { label:"Still unsuccessful", to:"canOxygenate" }
+      ]
+    },
+    canOxygenate: {
+      label:"Can you oxygenate with BVM/LMA?",
+      detail:"This is the critical decision point — it determines urgency of surgical airway.",
+      branch:[
+        { label:"YES — oxygenating adequately", to:"lma" },
+        { label:"NO — cannot oxygenate", to:"cric" }
+      ]
+    },
+    lma: {
+      label:"Insert supraglottic airway (LMA)",
+      detail:"Restores oxygenation while a definitive airway plan is made. Consider second-generation LMA if available. Re-attempt intubation through/alongside the LMA or proceed to OT for a controlled definitive airway.",
+      branch:[
+        { label:"Oxygenation adequate — plan definitive airway", to:"success" },
+        { label:"Deteriorating / inadequate", to:"cric" }
+      ]
+    },
+    cric: {
+      label:"CANNOT INTUBATE, CANNOT OXYGENATE — Scalpel cricothyrotomy",
+      detail:"Emergency surgical airway. Do not delay. Open the Cricothyrotomy module for the step-by-step guide.",
+      critical:true,
+      branch:[
+        { label:"Open Cricothyrotomy guide", to:"cricguide" }
+      ]
+    },
+    cricguide:{ label:"Cricothyrotomy", detail:"Proceeding to the guided cricothyrotomy module.", terminal:"cric" },
+    success: { label:"Airway secured", detail:"Confirm with waveform capnography and proceed to post-intubation care.", terminal:"confirm" }
+  }
+};
+
+/* ---- Cricothyrotomy steps ---- */
+const CRIC_STEPS = [
+  { id:"c1", label:"Identify cricothyroid membrane", detail:"Palpate between thyroid and cricoid cartilage in the midline." },
+  { id:"c2", label:"Prep & stabilize", detail:"Stabilize larynx with non-dominant hand. Quick antiseptic prep if time allows." },
+  { id:"c3", label:"Vertical skin incision", detail:"~3–4cm vertical incision through skin over the membrane." },
+  { id:"c4", label:"Horizontal membrane incision", detail:"Stab incision through the cricothyroid membrane; rotate blade 90°." },
+  { id:"c5", label:"Insert bougie / hook", detail:"Pass a bougie or tracheal hook through the incision, angled caudad." },
+  { id:"c6", label:"Railroad tube", detail:"Pass a cuffed 6.0mm ET or cric tube over the bougie into the trachea." },
+  { id:"c7", label:"Confirm & secure", detail:"Confirm with ETCO₂ and bilateral air entry, then secure the tube." }
+];
+
+/* ---- Ventilator presets — initial settings, adult 70kg reference unless noted ---- */
+const VENT_PRESETS = {
+  ards:      { label:"ARDS", mode:"Volume control (or pressure control)", tv:"6 mL/kg IBW", rr:"20–24", peep:"8–10, titrate up", fio2:"100% then titrate to SpO2 ≥90%", trigger:"Flow, 1–3 L/min", flow:"40–60 L/min, decelerating", ie:"1:1 to 1:1.5", note:"Target plateau pressure <30cmH2O; permissive hypercapnia acceptable." },
+  asthma:    { label:"Asthma / severe bronchospasm", mode:"Volume control", tv:"6–8 mL/kg IBW", rr:"8–10 (low)", peep:"0–5 (minimal — watch auto-PEEP)", fio2:"100% initially, titrate", trigger:"Flow, less sensitive to avoid auto-triggering", flow:"High, 60–80 L/min", ie:"1:4–1:5 (long expiratory time)", note:"Permissive hypercapnia. Watch for breath-stacking / dynamic hyperinflation; disconnect and decompress if hypotensive." },
+  copd:      { label:"COPD", mode:"Volume or pressure control", tv:"6–8 mL/kg IBW", rr:"10–12", peep:"Match intrinsic PEEP, often 3–5", fio2:"Titrate to SpO2 88–92%", trigger:"Flow", flow:"High, decelerating", ie:"1:3–1:4", note:"Watch for auto-PEEP; allow full exhalation." },
+  dka:       { label:"DKA / metabolic acidosis", mode:"Volume control", tv:"6–8 mL/kg IBW", rr:"Match pre-intubation minute ventilation (often 20–30)", peep:"5", fio2:"Titrate to SpO2 ≥94%", trigger:"Flow", flow:"High to allow adequate expiratory time at high RR", ie:"Short — prioritize matching prior compensatory hyperventilation", note:"Avoid hypoventilation post-intubation — a sudden drop in minute ventilation can worsen acidosis rapidly." },
+  tbi:       { label:"Traumatic brain injury", mode:"Volume control", tv:"6–8 mL/kg IBW", rr:"Titrate to normocapnia (PaCO2 35–40)", peep:"5 (avoid excess — can raise ICP via venous congestion)", fio2:"Titrate to SpO2 ≥94%, avoid hyperoxia", trigger:"Flow", flow:"Moderate", ie:"1:2", note:"Avoid routine hyperventilation unless actively herniating; avoid hypoxia and hypotension." },
+  pulmonary_edema: { label:"Pulmonary edema", mode:"Volume or pressure control", tv:"6 mL/kg IBW", rr:"14–18", peep:"8–12", fio2:"Titrate to SpO2 ≥94%", trigger:"Flow", flow:"Moderate", ie:"1:2", note:"Higher PEEP helps recruit flooded alveoli and reduce preload." },
+  hyperk:    { label:"Hyperkalemia arrest / peri-arrest", mode:"Volume control", tv:"6–8 mL/kg IBW", rr:"12–16, adjust to clinical state", peep:"5", fio2:"100% initially", trigger:"Flow", flow:"Moderate", ie:"1:2", note:"Avoid succinylcholine for RSI in known/suspected hyperkalemia. Treat hyperkalemia (calcium, insulin/dextrose, salbutamol) in parallel." },
+  rosc:      { label:"Post-ROSC", mode:"Volume control", tv:"6–8 mL/kg IBW", rr:"10–12, titrate to PaCO2 35–45", peep:"5, titrate to oxygenation", fio2:"Titrate down to SpO2 94–98% (avoid hyperoxia)", trigger:"Flow", flow:"Moderate", ie:"1:2", note:"Avoid hyperventilation and hyperoxia; target normocapnia/normoxia and consider temperature control per local protocol." }
+};
+
+/* ---- Pediatric weight estimation (age in years -> kg), simplified APLS formula ---- */
+function pediatricWeightEstimate(ageYears){
+  if(ageYears == null || isNaN(ageYears)) return null;
+  if(ageYears < 1) return Math.round((ageYears*12*0.5 + 4)*10)/10; // rough infant estimate
+  if(ageYears <= 5) return (2*ageYears)+8;
+  if(ageYears <= 12) return (3*ageYears)+7;
+  return null; // use adult approach beyond 12
+}
+
+/* ---- Cormack-Lehane grading (for documentation) ---- */
+const CORMACK_LEHANE = [
+  { v:"1", label:"Grade 1 — full glottis visible" },
+  { v:"2", label:"Grade 2 — partial glottis / arytenoids only" },
+  { v:"3", label:"Grade 3 — epiglottis only, no glottis seen" },
+  { v:"4", label:"Grade 4 — no airway structures seen" }
+];
