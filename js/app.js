@@ -634,11 +634,38 @@ const App = (() => {
         navigator.clipboard.writeText(text).then(() => {
           $("#reportCopy").textContent = "Copied!";
           setTimeout(() => { $("#reportCopy").textContent = "Copy"; }, 2000);
+        }).catch(() => {
+          // Fallback for browsers without clipboard API
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          $("#reportCopy").textContent = "Copied!";
+          setTimeout(() => { $("#reportCopy").textContent = "Copy"; }, 2000);
         });
       }
     });
 
     $("#reportPrint")?.addEventListener("click", () => window.print());
+
+    $("#reportSave")?.addEventListener("click", async () => {
+      const state = RSI.getState();
+      const report = $("#reportOut")?.textContent;
+      if (!report) return;
+      const c = await Store.saveCase({
+        date: new Date().toISOString(),
+        mode: state.mode,
+        report,
+        timeline: state.timeline,
+        attempts: state.attempts,
+        drugs: state.drugRecord,
+      });
+      $("#reportSave").textContent = "Saved!";
+      setTimeout(() => { $("#reportSave").textContent = "Save Case"; }, 2000);
+      renderSavedCases();
+    });
   }
 
   async function renderReports() {
@@ -657,23 +684,30 @@ const App = (() => {
 
     // Indication
     report += `INDICATION\n`;
-    report += `  ${fields.indication || "(not recorded)"}\n\n`;
+    report += `  ${state.fields.indication || "(not recorded)"}\n\n`;
 
     // Airway assessment
     report += `AIRWAY ASSESSMENT\n`;
-    const lemonResult = Calc.lemonScore(state.lemonFlags || []);
-    report += `  LEMON Score: ${lemonResult.score} — ${lemonResult.risk.label}\n`;
-    report += `  Recommendation: ${lemonResult.risk.rec}\n\n`;
+    const lemonFlags = state.lemonFlags || [];
+    if (lemonFlags.length > 0) {
+      const lemonResult = Calc.lemonScore(lemonFlags);
+      report += `  LEMON Score: ${lemonResult.score} — ${lemonResult.risk.label}\n`;
+      report += `  Recommendation: ${lemonResult.risk.rec}\n`;
+    } else {
+      report += `  (not formally assessed)\n`;
+    }
+    report += `\n`;
 
     // Pre-oxygenation
     report += `PRE-OXYGENATION\n`;
-    report += `  ${fields.decision_preoxygenation || "Standard 3-min 100% O₂"}\n\n`;
+    const preoxDecision = state.fields.decision_preoxygenation || state.fields.decision;
+    report += `  ${preoxDecision || "Standard 3-min 100% O₂"}\n\n`;
 
     // Drugs
     report += `DRUGS ADMINISTERED\n`;
-    if (state.drugRecord.length > 0) {
+    if (state.drugRecord && state.drugRecord.length > 0) {
       for (const d of state.drugRecord) {
-        report += `  ${d.name} ${d.dose}${d.unit}\n`;
+        report += `  ${d.name} ${d.dose || "—"}${d.unit || ""}\n`;
       }
     } else {
       report += `  (none recorded)\n`;
@@ -682,7 +716,7 @@ const App = (() => {
 
     // Timeline
     report += `TIMELINE\n`;
-    if (state.timeline.length > 0) {
+    if (state.timeline && state.timeline.length > 0) {
       for (const t of state.timeline) {
         report += `  ${t.clock}  ${t.event}\n`;
       }
@@ -693,9 +727,9 @@ const App = (() => {
 
     // Attempts
     report += `LARYNGOSCOPY ATTEMPTS\n`;
-    report += `  Total attempts: ${state.attempts.length}\n`;
-    for (const a of state.attempts) {
-      const dur = Math.round(a.durationMs / 1000);
+    report += `  Total attempts: ${(state.attempts || []).length}\n`;
+    for (const a of (state.attempts || [])) {
+      const dur = a.durationMs ? Math.round(a.durationMs / 1000) : "—";
       report += `  Attempt ${a.attempt}: ${dur}s`;
       if (a.clGrade) report += ` — CL Grade ${a.clGrade}`;
       report += `\n`;
@@ -703,24 +737,25 @@ const App = (() => {
     report += `\n`;
 
     // Cormack-Lehane
-    if (fields.cl_grade) {
-      report += `CORMACK-LEHANE GRADE: ${fields.cl_grade}\n`;
-      if (fields.view_pct) report += `POGO: ${fields.view_pct}%\n`;
+    const clGrade = state.fields.cl_grade;
+    if (clGrade) {
+      report += `CORMACK-LEHANE GRADE: ${clGrade}\n`;
+      if (state.fields.view_pct) report += `POGO: ${state.fields.view_pct}%\n`;
       report += `\n`;
     }
 
     // Bougie
-    report += `BOUGIE: ${fields.bougie_used ? "Yes" : "No"}\n\n`;
+    report += `BOUGIE: ${state.fields.bougie_used ? "Yes" : "No"}\n\n`;
 
     // Tube details
     report += `TUBE DETAILS\n`;
-    if (fields.ett_size) report += `  ETT size: ${fields.ett_size} mm\n`;
-    if (fields.ett_depth) report += `  Depth at teeth: ${fields.ett_depth} cm\n`;
+    if (state.fields.ett_size) report += `  ETT size: ${state.fields.ett_size} mm\n`;
+    if (state.fields.ett_depth) report += `  Depth at teeth: ${state.fields.ett_depth} cm\n`;
     report += `\n`;
 
     // Confirmation
     report += `TUBE CONFIRMATION\n`;
-    const confirmed = Object.entries(state.tubeConfirmed || {}).filter(([k, v]) => v);
+    const confirmed = Object.entries(state.tubeConfirmed || {}).filter(([, v]) => v);
     if (confirmed.length > 0) {
       for (const [id] of confirmed) {
         const item = DATA.tubeConfirmation.find((t) => t.id === id);
@@ -733,15 +768,16 @@ const App = (() => {
 
     // Complications
     report += `COMPLICATIONS\n`;
-    report += `  ${fields.complications || "None recorded"}\n\n`;
+    report += `  ${state.fields.complications || "None recorded"}\n\n`;
 
     // Operator & Assistant
-    report += `OPERATOR: ${fields.operator || "(not recorded)"}\n`;
-    report += `ASSISTANT: ${fields.assistant || "(not recorded)"}\n\n`;
+    report += `OPERATOR: ${state.fields.operator || "(not recorded)"}\n`;
+    report += `ASSISTANT: ${state.fields.assistant || "(not recorded)"}\n\n`;
 
     // Ventilator
-    if (fields.ventilatorPreset) {
-      const preset = DATA.ventilatorPresets.find((p) => p.id === fields.ventilatorPreset);
+    const ventPreset = state.fields.ventilatorPreset;
+    if (ventPreset) {
+      const preset = DATA.ventilatorPresets.find((p) => p.id === ventPreset);
       if (preset) {
         report += `VENTILATOR PRESET: ${preset.name}\n`;
         for (const [k, v] of Object.entries(preset.params)) {
@@ -753,38 +789,15 @@ const App = (() => {
 
     // Sedation
     report += `POST-INTUBATION SEDATION\n`;
-    report += `  ${fields.sedation || "Per protocol"}\n\n`;
+    report += `  ${state.fields.sedation || "Per protocol"}\n\n`;
 
     report += `${"═".repeat(50)}\n`;
     report += `Generated by ER Airway Assistant v2.0\n`;
-    report += `This is a clinical reference tool — verify against institutional protocol.\n`;
+    report += `Clinical reference tool — verify against institutional protocol.\n`;
 
     out.textContent = report;
 
-    // Save case
-    const saveBtn = document.createElement("button");
-    saveBtn.className = "act";
-    saveBtn.textContent = "Save Case";
-    saveBtn.addEventListener("click", async () => {
-      await Store.saveCase({
-        date: now.toISOString(),
-        mode: state.mode,
-        report,
-        timeline: state.timeline,
-        attempts: state.attempts,
-        drugs: state.drugRecord,
-      });
-      saveBtn.textContent = "Saved!";
-      setTimeout(() => { saveBtn.textContent = "Save Case"; }, 2000);
-      renderSavedCases();
-    });
-
-    const btnRow = out.parentElement?.querySelector(".btnrow");
-    if (btnRow && !btnRow.querySelector(".act.save-case")) {
-      saveBtn.classList.add("save-case");
-      btnRow.prepend(saveBtn);
-    }
-
+    // Render saved cases
     renderSavedCases();
   }
 

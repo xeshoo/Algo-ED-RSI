@@ -197,12 +197,14 @@ const RSI = (() => {
 
         if (selectedDecision === "yes") {
           timestamp("Decision: adequate — continuing RSI");
+          Voice.speak("Adequate. Continuing RSI.");
           $("#rsiBranches").style.display = "none";
           fields[`decision_${step.id}`] = "adequate";
           // Auto-advance
           setTimeout(() => next(), 400);
         } else {
           $("#rsiBranches").style.display = "block";
+          Voice.speak("Inadequate. Select a rescue strategy.");
           timestamp("Decision: inadequate — branching");
         }
       });
@@ -375,7 +377,7 @@ const RSI = (() => {
     // Bindings
     const startBtn = $("#attemptStartBtn");
     const endBtn = $("#attemptEndBtn");
-    if (startBtn) startBtn.addEventListener("click", () => { startAttempt(); renderAttemptTracking(step); });
+    if (startBtn) startBtn.addEventListener("click", () => { startAttempt(); Voice.speak("Attempt " + (attempts.length + 1) + " started"); renderAttemptTracking(step); });
     if (endBtn) endBtn.addEventListener("click", () => {
       endAttempt();
       // Save field values
@@ -432,6 +434,7 @@ const RSI = (() => {
         if (tubeConfirmed[id]) {
           const item = step.confirmSteps.find((c) => c.id === id);
           timestamp(`Confirmation: ${item.label}`);
+          Voice.speak(item.label);
         }
         renderTubeConfirmation(step);
       });
@@ -530,6 +533,9 @@ const RSI = (() => {
 
     // Back button
     $("#rsiBack").disabled = idx === 0;
+
+    // Announce step with voice
+    Voice.speak(step.name);
 
     // Route to appropriate renderer
     if (step.checklist) {
