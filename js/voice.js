@@ -1,25 +1,26 @@
 /* ==========================================================================
-   VOICE.JS — Web Speech API wrapper. Silently no-ops if unsupported
-   or disabled, so it's safe to call Voice.say() anywhere.
+   VOICE.JS — Web Speech API wrapper
    ========================================================================== */
 
-const Voice = {
-  enabled: true,
-  supported: typeof window !== "undefined" && "speechSynthesis" in window,
+"use strict";
 
-  say(text){
-    if(!this.enabled || !this.supported || !text) return;
-    try{
-      window.speechSynthesis.cancel(); // don't queue/overlap on rapid steps
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1.0;
-      utter.pitch = 1.0;
-      window.speechSynthesis.speak(utter);
-    } catch(e){ /* fail silent — never block the clinical flow */ }
-  },
+const Voice = (() => {
+  const synth = window.speechSynthesis;
+  let enabled = true;
 
-  setEnabled(val){
-    this.enabled = val;
-    if(!val && this.supported) window.speechSynthesis.cancel();
+  function speak(text) {
+    if (!enabled || !synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    u.pitch = 1;
+    u.volume = 1;
+    synth.speak(u);
   }
-};
+
+  function stop() { synth?.cancel(); }
+  function setEnabled(v) { enabled = v; if (!v) stop(); }
+  function isEnabled() { return enabled; }
+
+  return { speak, stop, setEnabled, isEnabled };
+})();

@@ -1,89 +1,92 @@
 /* ==========================================================================
-   CALCULATORS.JS — pure calculation functions, no DOM access.
-   Formulas are standard/commonly-taught approximations for quick bedside
-   reference; always cross-check against local protocol.
+   CALCULATORS.JS — Pure math: IBW, tube size/depth, LEMON, shock index
    ========================================================================== */
 
-const Calc = {
-  // Devine formula, cm height input
-  idealBodyWeight(heightCm, sex){
-    const heightIn = heightCm / 2.54;
-    const base = sex === "female" ? 45.5 : 50;
-    return Math.max(0, base + 2.3 * (heightIn - 60));
-  },
+"use strict";
 
-  // ARDSnet predicted body weight — same Devine-based formula, kept distinct
-  // because clinicians look for it by this name for lung-protective TV calcs
-  predictedBodyWeight(heightCm, sex){
-    return this.idealBodyWeight(heightCm, sex);
-  },
+const Calc = (() => {
 
-  // Adult ET tube size (internal diameter, mm)
-  adultTubeSize(sex){
-    return sex === "female" ? 7.5 : 8.0;
-  },
-
-  // Pediatric uncuffed/cuffed tube size, age in years
-  pediatricTubeSize(ageYears){
-    if(ageYears == null || isNaN(ageYears) || ageYears < 1) return null;
-    return { uncuffed: (ageYears/4)+4, cuffed: (ageYears/4)+3.5 };
-  },
-
-  // Tube depth at teeth/gums = 3x internal diameter (adult rule of thumb)
-  tubeDepth(tubeSizeMm){
-    return tubeSizeMm * 3;
-  },
-
-  // Pediatric tube depth (age-based, cm at lips)
-  pediatricTubeDepth(ageYears){
-    if(ageYears == null || isNaN(ageYears)) return null;
-    return (ageYears/2)+12;
-  },
-
-  // LMA size by weight (kg) — standard adult/pediatric sizing chart
-  lmaSize(weightKg){
-    if(weightKg == null || isNaN(weightKg)) return null;
-    const table = [
-      [5,1],[10,1.5],[20,2],[30,2.5],[50,3],[70,4],[Infinity,5]
-    ];
-    for(const [max,size] of table){ if(weightKg <= max) return size; }
-    return 5;
-  },
-
-  // Suggested laryngoscope blade size by age
-  bladeSize(ageYears){
-    if(ageYears == null || isNaN(ageYears)) return null;
-    if(ageYears < 1) return "Miller 0–1 (straight)";
-    if(ageYears < 8) return "Miller/Mac 1–2";
-    return "Mac 3–4";
-  },
-
-  // Difficult airway score — simple additive LEMON-style count (0-5, higher = more predictors)
-  difficultAirwayScore(flags){
-    return Object.values(flags).filter(Boolean).length;
-  },
-
-  shockIndex(hr, sbp){
-    if(!hr || !sbp) return null;
-    return hr / sbp;
-  },
-
-  map(sbp, dbp){
-    if(sbp == null || dbp == null) return null;
-    return dbp + (sbp - dbp) / 3;
-  },
-
-  // Generic weight-based dose calculator: value = perKg * weightKg
-  weightDose(perKg, weightKg){
-    if(!perKg || !weightKg) return null;
-    return perKg * weightKg;
-  },
-
-  // Convert mcg/kg/min pressor rate to mL/hr given a concentration (mg in mL bag)
-  pressorMlPerHr(mcgPerKgPerMin, weightKg, concentrationMgPerMl){
-    if(!mcgPerKgPerMin || !weightKg || !concentrationMgPerMl) return null;
-    const mgPerMin = (mcgPerKgPerMin * weightKg) / 1000;
-    const mlPerMin = mgPerMin / concentrationMgPerMl;
-    return mlPerMin * 60;
+  /* Ideal / predicted body weight (Devine formula) */
+  function ibw(heightCm, sex) {
+    const inches = heightCm / 2.54;
+    if (sex === "female") return 45.5 + 2.3 * (inches - 60);
+    return 50 + 2.3 * (inches - 60);
   }
-};
+
+  /* Tube size (adult: by sex; child: age/4+4) */
+  function tubeSize(ageYears, sex) {
+    if (ageYears !== null && ageYears !== undefined && ageYears < 16) {
+      const uncuffed = (ageYears / 4) + 4;
+      const cuffed = uncuffed - 0.5;
+      return {
+        uncuffed: uncuffed.toFixed(1),
+        cuffed: cuffed.toFixed(1),
+        depth: (uncuffed * 3).toFixed(0),
+        note: "Cuffed acceptable from term neonate — use low-pressure cuff",
+      };
+    }
+    if (sex === "female") return { size: "7.0", depth: "20" };
+    return { size: "8.0", depth: "22" };
+  }
+
+  /* LMA size by weight */
+  function lmaSize(weightKg) {
+    const table = DATA.lmaSizes;
+    for (const row of table) {
+      const [lo, hi] = row.weight.replace(/[^\d–-]/g, "").split(/[–-]/).map(Number);
+      if (weightKg >= lo && weightKg <= (hi || 999)) return row;
+    }
+    return table[table.length - 1];
+  }
+
+  /* LEMON score calculation */
+  function lemonScore(flags) {
+    let score = 0;
+    const allCriteria = [
+      ...DATA.lemon.external,
+      ...DATA.lemon.look,
+      ...DATA.lemon.evaluate_3_3,
+      ...DATA.lemon.mallampati,
+      ...DATA.lemon.neck,
+      ...DATA.lemon.obstruction,
+    ];
+    for (const criterion of allCriteria) {
+      if (flags.includes(criterion.id)) score++;
+    }
+
+    let risk;
+    if (score <= 1) risk = DATA.lemon.scoring.green;
+    else if (score <= 3) risk = DATA.lemon.scoring.amber;
+    else risk = DATA.lemon.scoring.red;
+
+    return { score, risk };
+  }
+
+  /* Shock index & MAP */
+  function shockIndex(hr, sbp, dbp) {
+    const si = hr / sbp;
+    const map = dbp + (sbp - dbp) / 3;
+    let interp;
+    if (si < 0.6) interp = "Normal";
+    else if (si < 1.0) interp = "Mild shock";
+    else if (si < 1.4) interp = "Moderate shock";
+    else interp = "Severe shock — consider massive transfusion";
+    return { si: si.toFixed(2), map: map.toFixed(0), interpretation: interp };
+  }
+
+  /* Vasopressor infusion rate: dose (mcg/kg/min) × weight (kg) × 60 / conc (mg/mL) = mL/hr */
+  function pressorRate(dosePerKgMin, weightKg, concMgPerMl) {
+    const rate = (dosePerKgMin * weightKg * 60) / concMgPerMl;
+    return rate.toFixed(1);
+  }
+
+  /* Drug dose calculation */
+  function drugDose(dosePerKg, weightKg, maxDose, minDose) {
+    let dose = dosePerKg * weightKg;
+    if (maxDose) dose = Math.min(dose, maxDose);
+    if (minDose) dose = Math.max(dose, minDose);
+    return Math.round(dose * 10) / 10;
+  }
+
+  return { ibw, tubeSize, lmaSize, lemonScore, shockIndex, pressorRate, drugDose };
+})();

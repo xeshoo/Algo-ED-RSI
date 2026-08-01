@@ -3,7 +3,7 @@
    Bump CACHE_NAME whenever you ship a change so clients pick up the update.
    ========================================================================== */
 
-const CACHE_NAME = "er-airway-v3";
+const CACHE_NAME = "er-airway-v2";
 const ASSETS = [
   "./",
   "./index.html",

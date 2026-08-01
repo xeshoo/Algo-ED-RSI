@@ -1,359 +1,647 @@
 /* ==========================================================================
-   RSI.JS — drives the full-screen RSI workflow (shared adult/pediatric).
-   State lives in RSI.state; render functions rebuild #rsiStepBody per step.
+   RSI.JS — RSI workflow engine: branching, checklist gate, timestamps, drugs
    ========================================================================== */
 
-const RSI = {
-  state: null,
-  clockInt: null,
-  attemptInt: null,
+"use strict";
 
-  reset(mode){
-    this.state = {
-      mode,                      // "adult" | "child"
-      category: mode === "child" ? "child" : "adult",
-      stepIndex: 0,
-      caseStart: null,
-      elapsed: 0,
-      weightKg: null,
-      ageYears: null,
-      equipChecked: new Set(),
-      confirmChecked: new Set(),
-      drugsGiven: [],            // {label, dose, time, elapsed}
-      attemptNumber: 0,
-      tubeSize: null,
-      tubeDepth: null
-    };
-  },
+const RSI = (() => {
+  let mode = "adult";       // "adult" | "child"
+  let steps = [];
+  let idx = 0;
+  let startTime = null;
+  let clockInterval = null;
+  let attemptTimer = null;
+  let attemptStart = null;
+  let attempts = [];         // { attempt, start, end, clGrade, viewPct, bougie, ettSize, ettDepth }
+  let currentAttempt = null;
+  let timeline = [];         // { time, event }
+  let drugRecord = [];       // { name, dose, unit, time }
+  let checklistState = {};   // { id: true/false }
+  let lemonFlags = [];
+  let tubeConfirmed = {};    // { id: true }
+  let fields = {};           // { fieldId: value }
+  let completed = false;
 
-  start(mode){
-    this.reset(mode);
-    this.state.caseStart = Date.now();
-    clearInterval(this.clockInt);
-    this.clockInt = setInterval(()=>this.tick(), 1000);
-    this.renderAll();
-    Voice.say(RSI_STEPS[0].voice);
-  },
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
 
-  tick(){
-    if(!this.state) return;
-    this.state.elapsed = Math.floor((Date.now()-this.state.caseStart)/1000);
-    document.getElementById("rsiClock").textContent = fmtTime(this.state.elapsed);
-    this.updateDelta();
-  },
+  /* ---- Lifecycle ---- */
+  function init(m) {
+    mode = m;
+    steps = DATA.rsiSteps[m];
+    idx = 0;
+    startTime = null;
+    clearInterval(clockInterval);
+    clearInterval(attemptTimer);
+    attemptTimer = null;
+    attemptStart = null;
+    attempts = [];
+    currentAttempt = null;
+    timeline = [];
+    drugRecord = [];
+    checklistState = {};
+    lemonFlags = [];
+    tubeConfirmed = {};
+    fields = {};
+    completed = false;
 
-  updateDelta(){
-    const idx = Math.min(this.state.stepIndex, IDEAL_TIMELINE.length-1);
-    const target = IDEAL_TIMELINE[idx].t;
-    const delta = this.state.elapsed - target;
-    const el = document.getElementById("rsiDelta");
-    if(delta > 5){
-      el.textContent = `⚠ Behind by ${delta}s`;
-      el.classList.add("behind");
-    } else {
-      el.textContent = delta < -5 ? "Ahead of pace" : "On pace";
-      el.classList.remove("behind");
-    }
-    this.renderTimeline();
-  },
+    $("#rsiClock").textContent = "00:00";
+    $("#rsiDelta").textContent = "";
+    render();
+  }
 
-  vibrate(pattern){
-    if(App.settings.vibrate && navigator.vibrate) navigator.vibrate(pattern);
-  },
+  function getState() {
+    return { mode, steps, idx, startTime, attempts, timeline, drugRecord, checklistState, lemonFlags, tubeConfirmed, fields, completed };
+  }
 
-  goStep(delta){
-    const next = this.state.stepIndex + delta;
-    if(next < 0 || next >= RSI_STEPS.length) return;
-    this.state.stepIndex = next;
-    this.vibrate(40);
-    Voice.say(RSI_STEPS[next].voice);
-    this.renderAll();
-  },
+  /* ---- Timer ---- */
+  function startTimer() {
+    startTime = Date.now();
+    clockInterval = setInterval(tick, 1000);
+    tick();
+  }
+  function tick() {
+    if (!startTime) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
+    $("#rsiClock").textContent = `${m}:${s}`;
+  }
+  function timestamp(event) {
+    const now = new Date();
+    const elapsed = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+    const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
+    timeline.push({
+      time: `${m}:${s}`,
+      clock: now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      event,
+    });
+    renderTimeline();
+  }
 
-  renderAll(){
-    const step = RSI_STEPS[this.state.stepIndex];
-    const next = RSI_STEPS[this.state.stepIndex+1];
-    document.getElementById("rsiStepName").textContent = step.label.toUpperCase();
-    document.getElementById("rsiNextName").textContent = next ? next.label : "Complete";
-    document.getElementById("rsiProgressFill").style.width =
-      `${Math.round(((this.state.stepIndex+1)/RSI_STEPS.length)*100)}%`;
-    document.getElementById("rsiBack").disabled = this.state.stepIndex === 0;
-    document.getElementById("rsiNext").textContent = next ? "NEXT" : "FINISH";
-    this.renderStepBody(step);
-    this.updateDelta();
-  },
+  /* ---- Attempt tracking ---- */
+  function startAttempt() {
+    attemptStart = Date.now();
+    const attemptNum = attempts.length + 1;
+    currentAttempt = { attempt: attemptNum, start: new Date().toISOString() };
+    timestamp(`Laryngoscopy attempt ${attemptNum} started`);
+    // start 30-second timer
+    if (attemptTimer) clearInterval(attemptTimer);
+    const timerEl = $("#rsiAttemptTimer");
+    if (timerEl) {
+      let sec = 0;
+      attemptTimer = setInterval(() => {
+        sec++;
+        timerEl.textContent = `${sec}s`;
+        if (sec >= 30) timerEl.style.color = "var(--red)";
+        else timerEl.style.color = "var(--accent)";
+      }, 1000);
+    }
+  }
 
-  renderStepBody(step){
-    const body = document.getElementById("rsiStepBody");
-    const s = this.state;
-    let html = "";
+  function endAttempt() {
+    if (attemptTimer) { clearInterval(attemptTimer); attemptTimer = null; }
+    if (currentAttempt) {
+      currentAttempt.end = new Date().toISOString();
+      currentAttempt.durationMs = Date.now() - attemptStart;
+      attempts.push(currentAttempt);
+      timestamp(`Laryngoscopy attempt ${currentAttempt.attempt} ended (${Math.round(currentAttempt.durationMs / 1000)}s)`);
+      currentAttempt = null;
+    }
+  }
 
-    if(step.id === "lemon"){
-      html += weightAgeInputsHtml(s);
-      html += checklistHtml("lemonChk", [
-        "Look for external markers of difficult airway",
-        "Evaluate the 3-3-2 rule",
-        "Mallampati score ≥ 3",
-        "Obstruction / obesity",
-        "Reduced neck mobility"
-      ], s.equipChecked, "lemon");
+  /* ---- Checklist gate ---- */
+  function renderChecklist() {
+    const body = $("#rsiStepBody");
+    const allChecked = DATA.preRSIChecklist.every((item) => checklistState[item.id]);
+
+    let html = `<div class="checklist-gate">
+      <h3>🔒 Airway Checklist — Challenge & Response</h3>`;
+
+    for (const item of DATA.preRSIChecklist) {
+      const checked = checklistState[item.id];
+      html += `
+        <div class="checklist-item ${checked ? "checked" : ""}" data-checklist="${item.id}">
+          <div class="checklist-check">${checked ? "✓" : ""}</div>
+          <span class="checklist-label">${item.icon} ${item.label}</span>
+        </div>`;
     }
-    else if(step.id === "equip"){
-      html += checklistHtml("equipChk", EQUIPMENT_CHECKLIST, s.equipChecked, "equip", true);
+
+    if (!allChecked) {
+      html += `<div class="checklist-gate-locked">⚠ All items must be checked before proceeding</div>`;
     }
-    else if(step.id === "preox"){
-      html += `<div class="card"><h3>Technique</h3><p class="note">Spontaneously breathing: tight non-rebreather at max flow, ≥5 min, avoid PPV if possible.<br>Not breathing adequately: BVM + reservoir 15L/min, 1 breath / 6s.</p></div>`;
-      html += timerHtml("preoxTimer", 300, "Preoxygenation (5 min)");
+    html += `</div>`;
+    body.innerHTML = html;
+
+    // Bind clicks
+    body.querySelectorAll("[data-checklist]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.checklist;
+        checklistState[id] = !checklistState[id];
+        if (checklistState[id]) timestamp(`Checklist: ${DATA.preRSIChecklist.find((c) => c.id === id).label}`);
+        renderChecklist();
+      });
+    });
+
+    // Enable/disable next button
+    $("#rsiNext").disabled = !allChecked;
+    if (allChecked) {
+      Voice.speak("All checklist items confirmed. You may proceed.");
+      timestamp("Airway checklist completed — all items confirmed");
+      startTimer();
     }
-    else if(step.id === "position"){
-      html += checklistHtml("posChk", [
-        "Belt/belly height — head at/above belt level",
-        "Head of patient up to head of bed",
-        "Head of bed up 30°",
-        "Ear level to sternal notch, face plane parallel to ceiling",
-        "Assistants ready (laryngeal manipulation, jaw thrust)"
-      ], s.equipChecked, "pos");
+  }
+
+  /* ---- Decision branch rendering ---- */
+  function renderDecision(step) {
+    const body = $("#rsiStepBody");
+    const dec = step.decision;
+    let html = `<div class="card"><p>${step.content}</p></div>`;
+    html += `<div class="tree-node">
+      <div class="tree-question">${dec.question}</div>
+      <div class="tree-options">
+        <div class="tree-option" data-decision="yes">
+          ✅ ${dec.yes.label}
+          <span class="tree-arrow">→</span>
+        </div>
+        <div class="tree-option" data-decision="no">
+          ❌ ${dec.no.label}
+          <span class="tree-arrow">↓</span>
+        </div>
+      </div>
+    </div>`;
+
+    // Branch options (hidden until NO selected)
+    html += `<div id="rsiBranches" style="display:none">`;
+    for (const branch of dec.no.branches) {
+      html += `<div class="tree-option" data-branch="${branch.id}">
+        🔀 ${branch.label}
+        ${branch.note ? `<br><small style="color:var(--text-dim)">${branch.note}</small>` : ""}
+        <span class="tree-arrow">→</span>
+      </div>`;
     }
-    else if(step.id === "induction"){
-      html += weightAgeInputsHtml(s);
-      html += categoryChipsHtml();
-      html += `<div class="card"><h3>Sedatives — pick one, tap to log</h3>${doseTableHtml(SEDATIVES, s, "induction")}</div>`;
+    html += `</div>`;
+    body.innerHTML = html;
+
+    let selectedDecision = null;
+
+    body.querySelectorAll("[data-decision]").forEach((el) => {
+      el.addEventListener("click", () => {
+        body.querySelectorAll("[data-decision]").forEach((e) => e.classList.remove("selected"));
+        el.classList.add("selected");
+        selectedDecision = el.dataset.decision;
+
+        if (selectedDecision === "yes") {
+          timestamp("Decision: adequate — continuing RSI");
+          $("#rsiBranches").style.display = "none";
+          fields[`decision_${step.id}`] = "adequate";
+          // Auto-advance
+          setTimeout(() => next(), 400);
+        } else {
+          $("#rsiBranches").style.display = "block";
+          timestamp("Decision: inadequate — branching");
+        }
+      });
+    });
+
+    body.querySelectorAll("[data-branch]").forEach((el) => {
+      el.addEventListener("click", () => {
+        body.querySelectorAll("[data-branch]").forEach((e) => e.classList.remove("selected"));
+        el.classList.add("selected");
+        const branchId = el.dataset.branch;
+        const branch = dec.no.branches.find((b) => b.id === branchId);
+        timestamp(`Branch selected: ${branch.label}`);
+        fields[`decision_${step.id}`] = branchId;
+        // Auto-advance
+        setTimeout(() => next(), 400);
+      });
+    });
+  }
+
+  /* ---- Drug choice rendering ---- */
+  function renderDrugChoice(step) {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card"><p>${step.content}</p></div>`;
+
+    for (const drugGroup of step.drugSequence) {
+      const group = DATA.drugs[drugGroup];
+      if (!group) continue;
+      html += `<div class="card"><h3>${group.label}</h3><div class="chiprow" data-group="${drugGroup}">`;
+      for (const agent of group.agents) {
+        const selected = drugRecord.find((d) => d.agentId === agent.id);
+        html += `<div class="chip ${selected ? "active" : ""}" data-drug="${agent.id}">${agent.name}</div>`;
+      }
+      html += `</div><div id="drugDetail_${drugGroup}" class="drug-detail-container"></div></div>`;
     }
-    else if(step.id === "paralytic"){
-      html += `<div class="card"><h3>Neuromuscular blockers — pick one, tap to log</h3>${nmbTableHtml(s)}</div>`;
+
+    html += `<div class="card">
+      <div class="weight-row">
+        <label>Patient weight</label>
+        <input type="number" id="rsiWeight" min="0" step="0.1" placeholder="kg" value="${fields.weight || ""}">
+        <span>kg</span>
+      </div>
+    </div>`;
+
+    body.innerHTML = html;
+
+    // Bind drug chip clicks
+    body.querySelectorAll("[data-drug]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const agentId = el.dataset.drug;
+        const groupKey = el.closest("[data-group]").dataset.group;
+        const group = DATA.drugs[groupKey];
+        const agent = group.agents.find((a) => a.id === agentId);
+
+        // Toggle active
+        el.closest(".chiprow").querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        el.classList.add("active");
+
+        // Show detail
+        const weight = parseFloat($("#rsiWeight")?.value) || 70;
+        const cat = fields.patientCategory || "adult";
+        let doseVal = null;
+        if (agent.dosePerKg) {
+          const dosePerKg = cat === "pediatric" || cat === "neonate" ? (agent.dosePerKg.child || agent.dosePerKg.adult) : agent.dosePerKg.adult;
+          doseVal = Calc.drugDose(dosePerKg, weight, agent.maxDose, agent.minDose);
+        }
+
+        let detail = `<div class="drug-header"><span class="drug-name">${agent.name}</span>`;
+        if (doseVal !== null) detail += `<span class="drug-dose">${doseVal} ${agent.unit}</span>`;
+        detail += `</div><dl class="drug-meta">`;
+        if (agent.onset) detail += `<dt>Onset</dt><dd>${agent.onset}</dd>`;
+        if (agent.duration) detail += `<dd>Duration</dd><dd>${agent.duration}</dd>`;
+        if (agent.route) detail += `<dt>Route</dt><dd>${agent.route}</dd>`;
+        if (agent.dosePerKg) detail += `<dt>Dose</dt><dd>${agent.dosePerKg.adult} ${agent.unit}/kg (adult)</dd>`;
+        if (doseVal !== null) detail += `<dt>Calculated</dt><dd>${doseVal} ${agent.unit} for ${weight} kg</dd>`;
+        detail += `</dl>`;
+
+        if (agent.contraindications?.length) {
+          detail += `<div class="drug-warn"><strong>Avoid in:</strong><br>${agent.contraindications.join("<br>")}</div>`;
+        }
+        if (agent.warnings) {
+          detail += `<div class="drug-warn" style="margin-top:6px;background:var(--amber-bg);border-color:rgba(255,183,77,.2);color:var(--amber)">${agent.warnings}</div>`;
+        }
+
+        document.getElementById(`drugDetail_${groupKey}`).innerHTML = detail;
+
+        // Record drug
+        drugRecord = drugRecord.filter((d) => d.group !== groupKey);
+        drugRecord.push({
+          group: groupKey,
+          agentId: agent.id,
+          name: agent.name,
+          dose: doseVal,
+          unit: agent.unit,
+          time: new Date().toISOString(),
+        });
+        timestamp(`${agent.name} ${doseVal}${agent.unit} administered`);
+        Voice.speak(`${agent.name} ${doseVal} ${agent.unit} pushed`);
+      });
+    });
+
+    // Weight input
+    const weightInput = $("#rsiWeight");
+    if (weightInput) {
+      weightInput.addEventListener("input", () => {
+        fields.weight = weightInput.value;
+      });
     }
-    else if(step.id === "waiting"){
-      html += `<div class="card"><p class="note">Allow the paralytic to take effect before laryngoscopy (~45–60s for rocuronium, ~30–60s for succinylcholine).</p></div>`;
-      html += timerHtml("waitTimer", 60, "Waiting for paralysis");
+  }
+
+  /* ---- Attempt tracking UI ---- */
+  function renderAttemptTracking(step) {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card"><p>${step.content}</p></div>`;
+
+    // Attempt counter
+    html += `<div class="attempt-counter">
+      <span class="ac-label">Attempt</span>
+      <span class="ac-num">${attempts.length + 1}</span>
+      <span id="rsiAttemptTimer" style="font-family:var(--font-mono);font-size:1.1rem;margin-left:auto">0s</span>
+    </div>`;
+
+    // Fields
+    if (step.fields) {
+      html += `<div class="card">`;
+      for (const field of step.fields) {
+        if (field.type === "select") {
+          html += `<div class="info-row">
+            <span class="info-label">${field.label}</span>
+            <select data-field="${field.id}" style="width:auto;padding:6px 10px">
+              <option value="">—</option>
+              ${field.options.map((o) => `<option value="${o}" ${fields[field.id] === o ? "selected" : ""}>${o}</option>`).join("")}
+            </select>
+          </div>`;
+        } else if (field.type === "number") {
+          html += `<div class="info-row">
+            <span class="info-label">${field.label}</span>
+            <input type="number" data-field="${field.id}" placeholder="—" value="${fields[field.id] || ""}" style="width:80px;padding:6px 10px">
+            ${field.suffix ? `<span>${field.suffix}</span>` : ""}
+          </div>`;
+        } else if (field.type === "toggle") {
+          html += `<div class="confirm-step ${fields[field.id] ? "done" : ""}" data-toggle-field="${field.id}">
+            <div class="cs-num">${fields[field.id] ? "✓" : ""}</div>
+            <span class="cs-text">${field.label}</span>
+          </div>`;
+        }
+      }
+      html += `</div>`;
     }
-    else if(step.id === "laryngoscopy"){
-      html += laryngoscopyHtml(s);
+
+    // Previous attempts summary
+    if (attempts.length > 0) {
+      html += `<div class="card"><h3>Previous Attempts</h3>`;
+      for (const a of attempts) {
+        const dur = Math.round(a.durationMs / 1000);
+        html += `<div class="info-row">
+          <span class="info-label">Attempt ${a.attempt}</span>
+          <span class="info-value">${dur}s ${a.clGrade ? `— CL ${a.clGrade}` : ""}</span>
+        </div>`;
+      }
+      html += `</div>`;
     }
-    else if(step.id === "confirm"){
-      html += checklistHtml("confirmChk", CONFIRMATION_CHECKLIST, s.confirmChecked, "confirm", true);
+
+    html += `<div class="bigbtns">
+      <button id="attemptStartBtn" class="bigbtn primary">START ATTEMPT</button>
+      <button id="attemptEndBtn" class="bigbtn ghost" ${!currentAttempt ? "disabled" : ""}>END ATTEMPT</button>
+    </div>`;
+
+    body.innerHTML = html;
+
+    // Bindings
+    const startBtn = $("#attemptStartBtn");
+    const endBtn = $("#attemptEndBtn");
+    if (startBtn) startBtn.addEventListener("click", () => { startAttempt(); renderAttemptTracking(step); });
+    if (endBtn) endBtn.addEventListener("click", () => {
+      endAttempt();
+      // Save field values
+      if (step.fields) {
+        for (const field of step.fields) {
+          const el = body.querySelector(`[data-field="${field.id}"]`);
+          if (el) fields[field.id] = el.value;
+        }
+      }
+      renderAttemptTracking(step);
+    });
+
+    // Field bindings
+    body.querySelectorAll("[data-field]").forEach((el) => {
+      el.addEventListener("change", () => { fields[el.dataset.field] = el.value; });
+    });
+    body.querySelectorAll("[data-toggle-field]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.toggleField;
+        fields[id] = !fields[id];
+        renderAttemptTracking(step);
+      });
+    });
+  }
+
+  /* ---- Tube confirmation rendering ---- */
+  function renderTubeConfirmation(step) {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card"><p>${step.content}</p></div>`;
+    html += `<div class="card">`;
+
+    for (const item of step.confirmSteps) {
+      const done = tubeConfirmed[item.id];
+      html += `<div class="confirm-step ${done ? "done" : ""}" data-confirm="${item.id}">
+        <div class="cs-num">${done ? "✓" : ""}</div>
+        <span class="cs-text">${item.primary ? "📈 " : ""}${item.label}${item.primary ? " <strong>(GOLD STANDARD)</strong>" : ""}</span>
+      </div>`;
     }
-    else if(step.id === "secure"){
-      html += secureHtml(s);
+    html += `</div>`;
+
+    // Check if ETCO2 confirmed
+    const etco2Done = tubeConfirmed["etco2"];
+    if (etco2Done) {
+      html += `<div class="tree-outcome green">✓ ETCO₂ confirmed — tube is in correct position</div>`;
     }
 
     body.innerHTML = html;
-    wireStepBody(step, s);
-  },
 
-  renderTimeline(){
-    const wrap = document.getElementById("rsiTimelineList");
-    if(!wrap) return;
-    wrap.innerHTML = IDEAL_TIMELINE.map((row,i)=>{
-      const cls = i < this.state.stepIndex ? "past" : (i === this.state.stepIndex ? "current" : "");
-      return `<div class="tl-row ${cls}"><span>${fmtTime(row.t)} ${row.label}</span>${cls==="past"?"<span>✓</span>":""}</div>`;
-    }).join("");
-  },
-
-  logDrug(label, doseText){
-    this.state.drugsGiven.push({ label, dose:doseText, time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}), elapsed:this.state.elapsed });
-    this.vibrate(30);
+    body.querySelectorAll("[data-confirm]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.confirm;
+        tubeConfirmed[id] = !tubeConfirmed[id];
+        if (tubeConfirmed[id]) {
+          const item = step.confirmSteps.find((c) => c.id === id);
+          timestamp(`Confirmation: ${item.label}`);
+        }
+        renderTubeConfirmation(step);
+      });
+    });
   }
-};
 
-/* ---------------- helpers to build HTML fragments ---------------- */
+  /* ---- Post-intubation rendering ---- */
+  function renderPostIntubation(step) {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card"><p>${step.content}</p></div>`;
 
-function fmtTime(sec){
-  const m = Math.floor(sec/60), s = sec%60;
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-}
+    // Summary of procedure so far
+    const elapsed = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+    const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    const s = String(elapsed % 60).padStart(2, "0");
 
-function weightAgeInputsHtml(s){
-  const ageField = s.mode === "child" ? `<input type="number" id="ageInput" placeholder="Age (yrs)" value="${s.ageYears ?? ""}">` : "";
-  return `<div class="card"><h3>Patient</h3><div class="inline-inputs">
-    ${ageField}
-    <input type="number" id="weightInput" placeholder="Weight kg" value="${s.weightKg ?? ""}">
-  </div>${s.mode==="child"?'<p class="note">Enter age to auto-estimate weight, or enter weight directly if known.</p>':""}</div>`;
-}
+    html += `<div class="card">
+      <h3>Procedure Summary</h3>
+      <div class="info-row"><span class="info-label">Total time</span><span class="info-value">${m}:${s}</span></div>
+      <div class="info-row"><span class="info-label">Attempts</span><span class="info-value">${attempts.length}</span></div>
+      ${fields.cl_grade ? `<div class="info-row"><span class="info-label">Cormack-Lehane</span><span class="info-value">Grade ${fields.cl_grade}</span></div>` : ""}
+      ${fields.ett_size ? `<div class="info-row"><span class="info-label">ETT size</span><span class="info-value">${fields.ett_size} mm</span></div>` : ""}
+      ${fields.ett_depth ? `<div class="info-row"><span class="info-label">ETT depth</span><span class="info-value">${fields.ett_depth} cm</span></div>` : ""}
+      ${fields.bougie_used ? `<div class="info-row"><span class="info-label">Bougie</span><span class="info-value">Used</span></div>` : ""}
+    </div>`;
 
-function categoryChipsHtml(){
-  return `<div class="card"><h3>Category</h3><div class="chiprow" id="rsiCategoryChips">
-    ${Object.entries(CATEGORIES).map(([k,c])=>`<button class="chip" data-cat="${k}">${c.label}</button>`).join("")}
-  </div></div>`;
-}
+    // Drug summary
+    if (drugRecord.length > 0) {
+      html += `<div class="card"><h3>Drugs Given</h3>`;
+      for (const d of drugRecord) {
+        html += `<div class="info-row"><span class="info-label">${d.name}</span><span class="info-value">${d.dose}${d.unit}</span></div>`;
+      }
+      html += `</div>`;
+    }
 
-function checklistHtml(id, items, storeSet, prefix, showPct){
-  const total = items.length;
-  const checked = items.filter((_,i)=>storeSet.has(prefix+i)).length;
-  return `<div class="card">
-    ${showPct?`<div class="chk-pct">${Math.round((checked/total)*100)}%</div>`:""}
-    <ul class="chk" id="${id}">
-      ${items.map((txt,i)=>`<li data-key="${prefix}${i}" class="${storeSet.has(prefix+i)?'on':''}"><span class="box">✓</span><span class="label">${txt}</span></li>`).join("")}
-    </ul>
-  </div>`;
-}
+    html += `<div class="bigbtns">
+      <button id="rsiCompleteBtn" class="bigbtn primary">COMPLETE & GENERATE REPORT</button>
+    </div>`;
 
-function doseTableHtml(list, s, logCtx){
-  return `<table class="dosetable">${list.map(d=>{
-    const val = Calc.weightDose(d.dose, s.weightKg);
-    return `<tr data-drugid="${d.id}" data-logctx="${logCtx}">
-      <td>${d.name}${d.note?`<span class="sub">${d.note}</span>`:""}</td>
-      <td class="calc">${val?val.toFixed(1)+" "+d.unit.split(" ")[0]:"— wt?"}</td>
-    </tr>`;
-  }).join("")}</table>`;
-}
+    body.innerHTML = html;
 
-function nmbTableHtml(s){
-  return `<table class="dosetable">${NMB.map(d=>{
-    const val = Calc.weightDose(d.dose, s.weightKg);
-    return `<tr data-drugid="${d.id}" data-logctx="paralytic">
-      <td>${d.name}<span class="sub">Onset ${d.onset} · Duration ${d.duration}${d.contraindications?` · CI: ${d.contraindications.join(", ")}`:""}</span></td>
-      <td class="calc">${val?val.toFixed(1)+" mg":"— wt?"}</td>
-    </tr>`;
-  }).join("")}</table>`;
-}
-
-function timerHtml(id, seconds, label){
-  return `<div class="attempt" id="${id}" data-seconds="${seconds}" data-remaining="${seconds}">
-    <div class="lbl">${label}</div><div class="n">${fmtTime(seconds)}</div>
-    <div class="btnrow" style="margin-top:10px;">
-      <button class="act ghost" data-timerstart="${id}">Start</button>
-      <button class="act ghost" data-timerreset="${id}">Reset</button>
-    </div></div>`;
-}
-
-function laryngoscopyHtml(s){
-  return `<div class="attempt" id="laryTimer" data-seconds="30" data-remaining="30">
-    <div class="lbl">Attempt ${s.attemptNumber+1}</div>
-    <div class="n">00</div>
-    <div class="stop">STOP ATTEMPT</div>
-    <div class="btnrow" style="margin-top:10px;">
-      <button class="act ghost" id="laryStart">Start attempt</button>
-      <button class="act ghost" id="laryNewAttempt">New attempt</button>
-    </div></div>`;
-}
-
-function secureHtml(s){
-  const isPed = s.mode === "child" && s.ageYears != null && !isNaN(s.ageYears);
-  const pedSizes = isPed ? Calc.pediatricTubeSize(s.ageYears) : null;
-  const tubeLabel = pedSizes
-    ? `${pedSizes.uncuffed.toFixed(1)}mm uncuffed / ${pedSizes.cuffed.toFixed(1)}mm cuffed`
-    : `${Calc.adultTubeSize("male")}mm`;
-  const depth = isPed ? Calc.pediatricTubeDepth(s.ageYears) : Calc.tubeDepth(Calc.adultTubeSize("male"));
-  return `<div class="card"><h3>Tube &amp; depth reference</h3>
-    <div class="result">Suggested tube: ${tubeLabel}<br>
-    Suggested depth at teeth/lips: ${depth ? depth.toFixed(1) : "—"}cm${isPed && !pedSizes ? " (under 1 year — use age/weight-specific chart)" : ""}</div>
-    <div class="inline-inputs" style="margin-top:10px;">
-      <input type="number" id="finalTubeSize" step="0.5" placeholder="Actual tube mm">
-      <input type="number" id="finalTubeDepth" step="0.5" placeholder="Actual depth cm">
-    </div>
-  </div>
-  <div class="btnrow"><button class="act green" id="genReportBtn">Generate documentation</button></div>`;
-}
-
-function wireStepBody(step, s){
-  // checklists
-  document.querySelectorAll("ul.chk li[data-key]").forEach(li=>{
-    li.addEventListener("click", ()=>{
-      const key = li.dataset.key;
-      const set = key.startsWith("confirm") ? s.confirmChecked : s.equipChecked;
-      set.has(key) ? set.delete(key) : set.add(key);
-      li.classList.toggle("on");
-      const card = li.closest(".card");
-      const pctEl = card.querySelector(".chk-pct");
-      if(pctEl){
-        const total = li.closest("ul").children.length;
-        const checked = li.closest("ul").querySelectorAll("li.on").length;
-        pctEl.textContent = `${Math.round((checked/total)*100)}%`;
+    $("#rsiCompleteBtn")?.addEventListener("click", () => {
+      completed = true;
+      timestamp("RSI procedure completed");
+      Voice.speak("RSI procedure completed. Report generated.");
+      // Navigate to reports
+      if (typeof App !== "undefined" && App.navigateTo) {
+        App.navigateTo("reports");
       }
     });
-  });
+  }
 
-  // weight / age inputs
-  const wt = document.getElementById("weightInput");
-  if(wt) wt.addEventListener("input", e=>{ s.weightKg = parseFloat(e.target.value)||null; RSI.renderStepBody(step); });
-  const ag = document.getElementById("ageInput");
-  if(ag) ag.addEventListener("input", e=>{
-    s.ageYears = parseFloat(e.target.value);
-    if(!isNaN(s.ageYears)){ const est = pediatricWeightEstimate(s.ageYears); if(est) s.weightKg = est; }
-    RSI.renderStepBody(step);
-  });
-
-  // category chips
-  document.querySelectorAll("#rsiCategoryChips .chip").forEach(chip=>{
-    if(chip.dataset.cat === s.category) chip.classList.add("on");
-    chip.addEventListener("click", ()=>{ s.category = chip.dataset.cat; RSI.renderStepBody(step); });
-  });
-
-  // dose table rows -> log drug on tap
-  document.querySelectorAll("table.dosetable tr[data-drugid]").forEach(tr=>{
-    tr.addEventListener("click", ()=>{
-      const id = tr.dataset.drugid;
-      const src = [...SEDATIVES, ...NMB].find(d=>d.id===id);
-      const val = Calc.weightDose(src.dose, s.weightKg);
-      const doseTxt = val ? `${val.toFixed(1)} ${src.unit.split(" ")[0]}` : src.unit;
-      RSI.logDrug(src.name, doseTxt);
-      tr.style.background = "var(--green-soft)";
-    });
-  });
-
-  // generic timers
-  document.querySelectorAll("[data-timerstart]").forEach(btn=>{
-    btn.addEventListener("click", ()=>startGenericTimer(btn.dataset.timerstart));
-  });
-  document.querySelectorAll("[data-timerreset]").forEach(btn=>{
-    btn.addEventListener("click", ()=>resetGenericTimer(btn.dataset.timerreset));
-  });
-
-  // laryngoscopy attempt timer
-  const laryStart = document.getElementById("laryStart");
-  if(laryStart) laryStart.addEventListener("click", startLaryngoscopyTimer);
-  const laryNew = document.getElementById("laryNewAttempt");
-  if(laryNew) laryNew.addEventListener("click", ()=>{
-    s.attemptNumber++;
-    RSI.renderStepBody(step);
-  });
-
-  // report generation
-  const genBtn = document.getElementById("genReportBtn");
-  if(genBtn) genBtn.addEventListener("click", ()=>{
-    s.tubeSize = document.getElementById("finalTubeSize").value;
-    s.tubeDepth = document.getElementById("finalTubeDepth").value;
-    App.buildReportFromRSI(s);
-    App.navigate("reports");
-  });
-}
-
-/* ---------------- generic timers (preox / waiting) ---------------- */
-const _timerHandles = {};
-function startGenericTimer(id){
-  const el = document.getElementById(id);
-  if(!el || _timerHandles[id]) return;
-  let remaining = parseInt(el.dataset.remaining,10);
-  _timerHandles[id] = setInterval(()=>{
-    remaining--;
-    el.dataset.remaining = remaining;
-    el.querySelector(".n").textContent = fmtTime(Math.max(remaining,0));
-    if(remaining <= 0){ clearInterval(_timerHandles[id]); delete _timerHandles[id]; RSI.vibrate([80,40,80]); }
-  },1000);
-}
-function resetGenericTimer(id){
-  const el = document.getElementById(id);
-  if(_timerHandles[id]){ clearInterval(_timerHandles[id]); delete _timerHandles[id]; }
-  el.dataset.remaining = el.dataset.seconds;
-  el.querySelector(".n").textContent = fmtTime(parseInt(el.dataset.seconds,10));
-}
-
-/* ---------------- laryngoscopy 30s attempt timer ---------------- */
-let _laryCount = 0, _laryHandle = null;
-function startLaryngoscopyTimer(){
-  const el = document.getElementById("laryTimer");
-  if(_laryHandle) return;
-  el.classList.remove("warn");
-  _laryCount = 0;
-  el.querySelector(".n").textContent = "00";
-  _laryHandle = setInterval(()=>{
-    _laryCount++;
-    el.querySelector(".n").textContent = String(_laryCount).padStart(2,"0");
-    if(_laryCount >= 30){
-      clearInterval(_laryHandle); _laryHandle = null;
-      el.classList.add("warn");
-      RSI.vibrate([200,100,200,100,200]);
-      Voice.say("Stop attempt.");
+  /* ---- Ventilator presets for post-intubation ---- */
+  function renderVentilatorStep() {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card">
+      <h3>Quick Ventilator Setup</h3>
+      <p class="note">Select a preset or configure manually</p>
+      <div class="chiprow" style="margin-top:10px">`;
+    for (const preset of DATA.ventilatorPresets) {
+      html += `<div class="chip" data-vent-preset="${preset.id}">${preset.name}</div>`;
     }
-  },1000);
-}
+    html += `</div><div id="ventPresetDetail"></div></div>`;
+    body.innerHTML = html;
+
+    body.querySelectorAll("[data-vent-preset]").forEach((el) => {
+      el.addEventListener("click", () => {
+        body.querySelectorAll("[data-vent-preset]").forEach((c) => c.classList.remove("active"));
+        el.classList.add("active");
+        const preset = DATA.ventilatorPresets.find((p) => p.id === el.dataset.ventPreset);
+        let detail = `<div style="margin-top:12px">`;
+        detail += `<div class="vent-params">`;
+        for (const [k, v] of Object.entries(preset.params)) {
+          detail += `<dt>${k.replace(/_/g, " ").toUpperCase()}</dt><dd>${v}</dd>`;
+        }
+        detail += `</div>`;
+        if (preset.notes) detail += `<p class="note" style="margin-top:10px">${preset.notes}</p>`;
+        detail += `</div>`;
+        document.getElementById("ventPresetDetail").innerHTML = detail;
+        fields.ventilatorPreset = preset.id;
+        timestamp(`Ventilator preset: ${preset.name}`);
+      });
+    });
+  }
+
+  /* ---- Main render ---- */
+  function render() {
+    const step = steps[idx];
+    if (!step) return;
+
+    // Update header
+    $("#rsiStepName").textContent = step.name;
+    $("#rsiNextName").textContent = idx < steps.length - 1 ? steps[idx + 1].name : "Complete";
+    const pct = ((idx) / (steps.length - 1)) * 100;
+    $("#rsiProgressFill").style.width = `${pct}%`;
+
+    // Back button
+    $("#rsiBack").disabled = idx === 0;
+
+    // Route to appropriate renderer
+    if (step.checklist) {
+      renderChecklist();
+    } else if (step.decision) {
+      renderDecision(step);
+    } else if (step.drugChoice) {
+      renderDrugChoice(step);
+    } else if (step.attemptTracking) {
+      renderAttemptTracking(step);
+    } else if (step.confirmSteps) {
+      renderTubeConfirmation(step);
+    } else if (step.postIntubation) {
+      renderPostIntubation(step);
+    } else if (step.timer) {
+      renderTimerStep(step);
+    } else {
+      renderGenericStep(step);
+    }
+
+    // Update next button state
+    updateNextState(step);
+  }
+
+  function renderTimerStep(step) {
+    const body = $("#rsiStepBody");
+    let html = `<div class="card"><p>${step.content}</p></div>`;
+    html += `<div class="rsi-timerbar">
+      <div class="rsi-clock" id="stepTimer">${step.timer.duration || 0}s</div>
+      <button id="stepTimerStart" class="bigbtn primary small">START</button>
+    </div>`;
+    body.innerHTML = html;
+
+    let remaining = step.timer.duration || 60;
+    let timerRunning = false;
+    const timerEl = body.querySelector("#stepTimer");
+    const startBtn = body.querySelector("#stepTimerStart");
+
+    startBtn?.addEventListener("click", () => {
+      if (timerRunning) return;
+      timerRunning = true;
+      startBtn.disabled = true;
+      startBtn.textContent = "RUNNING";
+      timestamp(`Timer started: ${step.timer.label}`);
+      Voice.speak(`Timer started. ${step.timer.label}`);
+
+      const iv = setInterval(() => {
+        remaining--;
+        timerEl.textContent = `${remaining}s`;
+        if (remaining <= 10) timerEl.style.color = "var(--red)";
+        if (remaining <= 0) {
+          clearInterval(iv);
+          timerEl.textContent = "✓ GO";
+          timerEl.style.color = "var(--green)";
+          Voice.speak("Timer complete. Proceed.");
+          timestamp(`Timer complete: ${step.timer.label}`);
+          $("#rsiNext").disabled = false;
+        }
+      }, 1000);
+    });
+  }
+
+  function renderGenericStep(step) {
+    const body = $("#rsiStepBody");
+    body.innerHTML = `<div class="card"><p>${step.content}</p></div>`;
+  }
+
+  function updateNextState(step) {
+    const nextBtn = $("#rsiNext");
+    if (step.checklist) {
+      const allChecked = DATA.preRSIChecklist.every((item) => checklistState[item.id]);
+      nextBtn.disabled = !allChecked;
+    } else if (step.decision) {
+      nextBtn.disabled = true; // auto-advances on selection
+    } else if (step.timer) {
+      nextBtn.disabled = true; // enabled when timer completes
+    } else {
+      nextBtn.disabled = false;
+    }
+  }
+
+  /* ---- Navigation ---- */
+  function next() {
+    if (idx < steps.length - 1) {
+      // End any active attempt
+      if (currentAttempt) endAttempt();
+      idx++;
+      render();
+    }
+  }
+
+  function back() {
+    if (idx > 0) {
+      idx--;
+      render();
+    }
+  }
+
+  /* ---- Timeline rendering ---- */
+  function renderTimeline() {
+    const list = $("#rsiTimelineList");
+    if (!list) return;
+    list.innerHTML = timeline.map((t) => `
+      <div class="timeline-entry">
+        <span class="tl-time">${t.time}</span>
+        <span class="tl-event">${t.event}</span>
+      </div>
+    `).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+
+  /* ---- Emergency / Failed airway ---- */
+  function triggerEmergency() {
+    endAttempt();
+    timestamp("EMERGENCY declared — navigating to failed airway");
+  }
+
+  return { init, getState, next, back, render, timestamp, triggerEmergency, renderTimeline };
+})();

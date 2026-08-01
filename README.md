@@ -1,57 +1,91 @@
-# ER Airway Assistant — Phase 1
+# ER Airway Assistant — Phase 2
 
-A reference/workflow tool for RSI, failed airway, and cricothyrotomy. Built as a
-Progressive Web App: vanilla HTML/CSS/JS, no build step, no external dependencies.
+A comprehensive reference/workflow tool for RSI, failed airway, and cricothyrotomy.  
+Built as a Progressive Web App: vanilla HTML/CSS/JS, no build step, no external dependencies.
 
-## Why hosting matters
-Android's "Add to Home screen" install prompt and the offline service worker
-**only activate over HTTPS** (or `localhost`). Opening `index.html` straight
-from a phone's file browser will not enable install or offline mode — the UI
-still works, but skip those two features.
+## What's New in Phase 2
 
-## Fastest path to a real install (free, ~5 minutes)
-1. Create a free GitHub account if you don't have one.
-2. Create a new repository, upload this whole folder's contents to it.
-3. Repo → Settings → Pages → Deploy from branch → `main` / root. GitHub gives
-   you a URL like `https://yourname.github.io/repo-name/`.
-4. Open that URL on your Android phone in Chrome → menu (⋮) → **Install app**.
-5. Open it once while online so the service worker caches the app shell —
-   after that it works with airplane mode on.
+### 1. Dynamic Decision-Tree RSI Workflow
+The RSI workflow is no longer linear. It branches based on patient condition:
+- **Pre-oxygenation decision point**: Adequate → continue, Inadequate → NIV / BVM / DSI branches
+- Each branch records the decision and continues appropriately
+- Pediatric pathway with age-specific considerations
 
-Netlify Drop (netlify.com/drop) works the same way if you'd rather drag-and-drop
-the folder instead of using Git.
+### 2. Interactive LEMON Scoring
+- Full LEMON assessment with checkboxes for all criteria
+- **Automatic score calculation** with color-coded risk display:
+  - 🟢 **0–1**: Low risk — Standard RSI
+  - 🟡 **2–3**: Moderate risk — Senior review, consider video laryngoscopy
+  - 🔴 **4+**: High risk — Awake airway strategy, surgical standby
 
-## File map
+### 3. Enhanced Drug Calculator
+Each drug now shows:
+- **Calculated dose** based on weight
+- **Onset** and **duration**
+- **Route** of administration
+- **Contraindications** (highlighted warnings)
+- **Special warnings** and clinical pearls
+- Elderly dose reduction automatically applied (25% reduction)
+
+### 4. Real-Time Timestamp Logging
+Every significant event is automatically timestamped:
+- Checklist completion, drug administration, decision points
+- Laryngoscopy attempts with duration tracking
+- Tube confirmation steps, emergency declarations
+- Displays elapsed time (from RSI start) and wall-clock time
+
+### 5. Interactive Failed Airway Algorithm
+Decision-tree flow for Cannot Intubate → Can Oxygenate? → SGA vs CICO with equipment checklists and step-by-step cricothyrotomy procedure.
+
+### 6. Evidence-Based Ventilator Presets
+8 condition-specific presets (ARDS, Asthma, COPD, TBI, Pulmonary Edema, DKA, Post-ROSC, Hyperkalemia Arrest) each with complete settings and clinical notes.
+
+### 7. Comprehensive Procedure Report
+Auto-generated report with: indication, LEMON score, drugs, timeline, attempts, Cormack-Lehane grade, tube details, ETCO₂ confirmation, complications, operator, assistant, ventilator settings. Save, copy, or print/PDF.
+
+### 8. Mandatory Airway Checklist (Challenge-Response)
+10-item checklist that gates progression — all items must be checked before the RSI timer starts.
+
+### 9. ETCO₂-First Tube Confirmation
+Confirmation hierarchy follows current guidelines with waveform ETCO₂ as gold standard.
+
+### 10. Premium Visual Design
+Modern dark theme, smooth animations, color-coded risk indicators, responsive design, PWA installable with offline support.
+
+## File Map
 ```
-index.html          screens (dashboard, RSI, calculator, failed airway, cric, ventilator, calculators, reports, settings)
-css/style.css        all styling — tokens at the top
-js/data.js            *** edit here to change doses, checklist wording, timelines, ventilator presets ***
-js/calculators.js     pure math (IBW, tube size/depth, LMA size, shock index, MAP, pressor rates)
-js/storage.js         IndexedDB wrapper (settings + saved case reports)
-js/voice.js           Web Speech API wrapper
-js/rsi.js             the RSI workflow screen: timer, smart timeline, laryngoscopy attempt timer, checklists
-js/app.js             routing + every other screen + install/service-worker wiring
-manifest.json         installability metadata
-service-worker.js     offline cache-first strategy — bump CACHE_NAME after any content edit
-icons/                app icons (simple original geometric mark, no third-party assets)
+index.html              All screens with branching RSI, interactive failed airway, ventilator presets
+css/style.css           Design system with tokens, animations, color-coded components
+js/data.js              *** Clinical data hub — edit here for doses, presets, checklists ***
+js/calculators.js       Pure math: IBW, tube size, LEMON scoring, shock index, pressor rates
+js/storage.js           IndexedDB wrapper (settings + saved case reports)
+js/voice.js             Web Speech API wrapper
+js/rsi.js               RSI workflow engine: branching logic, checklist gate, timestamps, attempts
+js/app.js               Routing, failed airway flow, ventilator presets, report generation
+manifest.json           Installability metadata
+service-worker.js       Offline cache-first strategy (bump CACHE_NAME after edits)
+icons/                  App icons
 ```
 
-## Updating content later
-Almost everything clinical (doses, checklist text, timeline targets, ventilator
-presets) lives in `js/data.js`. Change a number or a string there and it flows
-through every screen that uses it — you shouldn't need to touch the HTML/CSS
-for routine updates. After any edit, bump `CACHE_NAME` in `service-worker.js`
-(e.g. `er-airway-v2`) so installed phones pick up the change next time they're online.
+## Updating Content
+Almost everything clinical (doses, checklist text, ventilator presets, drug info) lives in `js/data.js`. Change a value there and it flows through every screen. After any edit, bump `CACHE_NAME` in `service-worker.js`.
 
-## Known limitations (Phase 1)
-- No login / multi-user sync — case reports save locally to the device only.
-- Pediatric dosing uses standard per-kg formulas and an age→weight estimate;
-  always prefer a measured weight or Broselow tape when available.
-- Voice guidance uses the phone's built-in text-to-speech voice/quality.
-- This is a clinical reference and workflow timer — it does not replace
-  institutional protocol, senior consultation, or clinical judgment.
+## Hosting
+Requires HTTPS for install prompt and offline mode. Deploy via:
+1. **GitHub Pages**: Push to repo → Settings → Pages → Deploy from `main`
+2. **Netlify Drop**: Drag-and-drop the folder at netlify.com/drop
 
-## Suggested Phase 2 ideas
-ACLS/PALS/ATLS modules, sepsis bundle, massive transfusion protocol, stroke
-thrombolysis checklist, STEMI pathway, toxicology quick-reference, burn
-resuscitation calculator, multi-device case sync.
+## Known Limitations
+- No login / multi-user sync — case reports save locally only
+- Pediatric dosing uses standard per-kg formulas; prefer measured weight or Broselow
+- Voice guidance uses built-in TTS voice quality
+- Clinical reference and workflow timer — does not replace institutional protocol
+
+## Phase 3 Ideas
+- ACLS/PALS/ATLS modules
+- Sepsis bundle / massive transfusion protocol
+- Stroke thrombolysis checklist / STEMI pathway
+- Toxicology quick-reference / burn resuscitation calculator
+- Multi-device case sync
+- Customizable protocols for local hospital practice
+- CPR integration for peri-arrest intubations
