@@ -141,6 +141,9 @@ const RSI = (() => {
         checklistState[id] = !checklistState[id];
         if (checklistState[id]) timestamp(`Checklist: ${DATA.preRSIChecklist.find((c) => c.id === id).label}`);
         renderChecklist();
+        // Update NEXT button state after toggle
+        const allNowChecked = DATA.preRSIChecklist.every((item) => checklistState[item.id]);
+        $("#rsiNext").disabled = !allNowChecked;
       });
     });
 
