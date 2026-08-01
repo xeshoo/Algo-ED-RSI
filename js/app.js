@@ -145,7 +145,21 @@ const App = (() => {
   /* ---- Register SW ---- */
   function registerSW() {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+      navigator.serviceWorker.register("./service-worker.js").then((reg) => {
+        // Check for updates periodically
+        reg.update();
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              // New version available — activate it immediately
+              newWorker.postMessage({ type: "SKIP_WAITING" });
+              // Reload once to pick up new cache
+              window.location.reload();
+            }
+          });
+        });
+      }).catch(() => {});
     }
     window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
