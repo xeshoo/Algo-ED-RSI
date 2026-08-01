@@ -1,79 +1,71 @@
 /* ==========================================================================
-   STORAGE.JS — IndexedDB wrapper for settings + saved case reports
+   STORAGE.JS — thin IndexedDB wrapper.
+   Two stores: "settings" (key/value app prefs) and "cases" (saved case logs
+   for the documentation generator / audit trail).
    ========================================================================== */
 
-"use strict";
+const DB_NAME = "er-airway-assistant";
+const DB_VERSION = 1;
+let _dbPromise = null;
 
-const Store = (() => {
-  const DB_NAME = "er-airway";
-  const DB_VER = 2;
-  let db = null;
+function openDB(){
+  if(_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath:"key" });
+      if(!db.objectStoreNames.contains("cases")) db.createObjectStore("cases", { keyPath:"id", autoIncrement:true });
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+  return _dbPromise;
+}
 
-  function open() {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VER);
-      req.onupgradeneeded = (e) => {
-        const d = e.target.result;
-        if (!d.objectStoreNames.contains("settings")) d.createObjectStore("settings");
-        if (!d.objectStoreNames.contains("cases")) d.createObjectStore("cases", { keyPath: "id" });
-      };
-      req.onsuccess = (e) => { db = e.target.result; resolve(db); };
-      req.onerror = (e) => reject(e.target.error);
-    });
+const Store = {
+  async getSetting(key, fallback){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve) => {
+        const tx = db.transaction("settings","readonly");
+        const req = tx.objectStore("settings").get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : fallback);
+        req.onerror = () => resolve(fallback);
+      });
+    } catch(e){ return fallback; }
+  },
+  async setSetting(key, value){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve) => {
+        const tx = db.transaction("settings","readwrite");
+        tx.objectStore("settings").put({ key, value });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      });
+    } catch(e){ return false; }
+  },
+  async saveCase(caseRecord){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve) => {
+        const tx = db.transaction("cases","readwrite");
+        const req = tx.objectStore("cases").add(caseRecord);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+    } catch(e){ return null; }
+  },
+  async listCases(){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve) => {
+        const tx = db.transaction("cases","readonly");
+        const req = tx.objectStore("cases").getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+    } catch(e){ return []; }
   }
-
-  function tx(store, mode) {
-    return db.transaction(store, mode).objectStore(store);
-  }
-
-  function get(store, key) {
-    return new Promise((resolve, reject) => {
-      const r = tx(store, "readonly").get(key);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
-  }
-
-  function set(store, key, value) {
-    return new Promise((resolve, reject) => {
-      const r = tx(store, "readwrite").put(value, key);
-      r.onsuccess = () => resolve();
-      r.onerror = () => reject(r.error);
-    });
-  }
-
-  function del(store, key) {
-    return new Promise((resolve, reject) => {
-      const r = tx(store, "readwrite").delete(key);
-      r.onsuccess = () => resolve();
-      r.onerror = () => reject(r.error);
-    });
-  }
-
-  function all(store) {
-    return new Promise((resolve, reject) => {
-      const r = tx(store, "readonly").getAll();
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
-  }
-
-  /* Settings helpers */
-  async function getSetting(key, fallback) {
-    try { const v = await get("settings", key); return v !== undefined ? v : fallback; }
-    catch { return fallback; }
-  }
-  async function setSetting(key, value) { return set("settings", key, value); }
-
-  /* Case helpers */
-  async function saveCase(c) {
-    c.id = c.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    c.savedAt = c.savedAt || new Date().toISOString();
-    await set("cases", c);
-    return c;
-  }
-  async function listCases() { return (await all("cases")).sort((a, b) => b.savedAt.localeCompare(a.savedAt)); }
-  async function deleteCase(id) { return del("cases", id); }
-
-  return { open, getSetting, setSetting, saveCase, listCases, deleteCase };
-})();
+};
