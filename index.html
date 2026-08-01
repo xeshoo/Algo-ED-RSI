@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0B1929">
+<meta name="theme-color" content="#0F2A3D">
 <title>ER Airway Assistant</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -52,7 +52,7 @@
     <p class="dash-note">Reference tool to support clinical judgment — not a substitute for it. Verify all doses against local protocol.</p>
   </section>
 
-  <!-- ============ RSI WORKFLOW (branching decision tree) ============ -->
+  <!-- ============ RSI WORKFLOW (shared adult / pediatric) ============ -->
   <section id="screen-rsi" class="screen">
     <div class="rsi-timerbar">
       <div class="rsi-clock" id="rsiClock">00:00</div>
@@ -65,16 +65,16 @@
       <div class="rsi-next">Next: <span id="rsiNextName">—</span></div>
     </div>
 
-    <div id="rsiStepBody" class="rsi-stepbody"></div>
+    <div id="rsiStepBody" class="rsi-stepbody"><!-- step-specific content injected here --></div>
 
-    <div class="bigbtns">
+    <div class="rsi-bigbtns">
       <button id="rsiBack" class="bigbtn ghost">BACK</button>
       <button id="rsiNext" class="bigbtn primary">NEXT</button>
     </div>
     <button id="rsiEmergency" class="bigbtn emergency">EMERGENCY</button>
 
     <details class="timeline-drawer">
-      <summary>Timeline & Event Log</summary>
+      <summary>Smart timeline</summary>
       <div id="rsiTimelineList" class="timeline-list"></div>
     </details>
   </section>
@@ -94,37 +94,34 @@
       </div>
     </div>
     <div class="card">
-      <h3>Sedatives / Induction</h3>
-      <table class="dosetable" id="calcSedTable"></table>
+      <h3>Sedatives / induction</h3>
+      <div id="calcSedTable"></div>
     </div>
     <div class="card">
-      <h3>Neuromuscular Blockers</h3>
-      <table class="dosetable" id="calcNmbTable"></table>
+      <h3>Neuromuscular blockers</h3>
+      <div id="calcNmbTable"></div>
     </div>
     <div class="card">
-      <h3>Post-Intubation Infusions</h3>
+      <h3>Post-intubation infusions</h3>
       <table class="dosetable" id="calcInfTable"></table>
     </div>
   </section>
 
-  <!-- ============ FAILED AIRWAY (interactive algorithm) ============ -->
+  <!-- ============ FAILED AIRWAY ============ -->
   <section id="screen-failed" class="screen">
-    <p class="note">Interactive decision tree — tap to branch.</p>
+    <p class="note">Answer each decision point as it applies to your patient — the algorithm branches with you.</p>
     <div id="failedFlow" class="flow"></div>
   </section>
 
   <!-- ============ CRICOTHYROTOMY ============ -->
   <section id="screen-cric" class="screen">
-    <div class="rsi-timerbar">
-      <div class="rsi-clock" id="cricClock">00:00</div>
-      <button id="cricStart" class="bigbtn primary small">START</button>
-    </div>
-    <div id="cricFlow" class="flow"></div>
+    <div class="rsi-timerbar"><div class="rsi-clock" id="cricClock">00:00</div>
+      <button id="cricStart" class="bigbtn primary small">START</button></div>
+    <div id="cricFlow" class="flow numbered"></div>
   </section>
 
   <!-- ============ VENTILATOR PRESETS ============ -->
   <section id="screen-ventilator" class="screen">
-    <p class="note">Evidence-based presets — tap for details.</p>
     <div id="ventGrid" class="dash-grid two-col"></div>
     <div id="ventDetail" class="card" hidden></div>
   </section>
@@ -132,7 +129,7 @@
   <!-- ============ AIRWAY CALCULATORS ============ -->
   <section id="screen-calculators" class="screen">
     <div class="card">
-      <h3>Ideal / Predicted Body Weight</h3>
+      <h3>Ideal / predicted body weight</h3>
       <div class="inline-inputs">
         <input type="number" id="cHeight" placeholder="Height cm">
         <select id="cSex"><option value="male">Male</option><option value="female">Female</option></select>
@@ -140,26 +137,26 @@
       <div class="result" id="cIBWOut">—</div>
     </div>
     <div class="card">
-      <h3>Tube Size & Depth</h3>
+      <h3>Tube size &amp; depth</h3>
       <div class="inline-inputs">
         <input type="number" id="cAge" placeholder="Age (years, blank = adult)">
       </div>
       <div class="result" id="cTubeOut">—</div>
     </div>
     <div class="card">
-      <h3>LMA Size</h3>
+      <h3>LMA size &amp; blade</h3>
       <div class="inline-inputs">
         <input type="number" id="cLmaWeight" placeholder="Weight kg">
       </div>
       <div class="result" id="cLmaOut">—</div>
     </div>
     <div class="card">
-      <h3>Difficult Airway Score (LEMON)</h3>
+      <h3>Difficult airway score (LEMON count)</h3>
       <div id="cDASFlags" class="chk-mini"></div>
-      <div class="result" id="cDASOut"></div>
+      <div class="result" id="cDASOut">0 predictors</div>
     </div>
     <div class="card">
-      <h3>Shock Index & MAP</h3>
+      <h3>Shock index &amp; MAP</h3>
       <div class="inline-inputs">
         <input type="number" id="cHR" placeholder="HR">
         <input type="number" id="cSBP" placeholder="SBP">
@@ -168,9 +165,9 @@
       <div class="result" id="cShockOut">—</div>
     </div>
     <div class="card">
-      <h3>Vasopressor Infusion Rate</h3>
+      <h3>Vasopressor infusion rate</h3>
       <div id="cPressorChips" class="chiprow"></div>
-      <div class="inline-inputs" style="margin-top:8px">
+      <div class="inline-inputs">
         <input type="number" id="cPressorWeight" placeholder="Weight kg">
         <input type="number" id="cPressorConc" placeholder="Conc. mg/mL">
       </div>
@@ -182,12 +179,11 @@
   <section id="screen-reports" class="screen">
     <div id="reportOut" class="card report"></div>
     <div class="btnrow">
-      <button id="reportSave" class="act">Save Case</button>
       <button id="reportCopy" class="act">Copy</button>
       <button id="reportPrint" class="act ghost">Print / Save PDF</button>
     </div>
     <div class="card">
-      <h3>Saved Cases</h3>
+      <h3>Saved cases</h3>
       <div id="savedCasesList" class="note"></div>
     </div>
   </section>
@@ -201,14 +197,8 @@
     </div>
     <div class="card">
       <h3>Install this app</h3>
-      <p class="note">On Android Chrome: menu (⋮) → "Add to Home screen" / "Install app". Requires HTTPS.</p>
+      <p class="note">On Android Chrome: menu (⋮) → "Add to Home screen" / "Install app". Requires the app to be served over HTTPS.</p>
       <button id="installBtn" class="act" hidden>Install now</button>
-    </div>
-    <div class="card">
-      <h3>About</h3>
-      <p class="note">ER Airway Assistant v2.0<br>
-      Clinical reference and workflow tool for RSI, failed airway, and cricothyrotomy.<br>
-      Not a substitute for institutional protocol or clinical judgment.</p>
     </div>
   </section>
 
@@ -217,18 +207,18 @@
 <!-- ============ EMERGENCY OVERLAY ============ -->
 <div id="emergencyOverlay" class="overlay" hidden>
   <div class="overlay-content">
-    <h2>Failed Airway / Emergency</h2>
-    <p>Jump to the failed airway algorithm or resume the current RSI.</p>
+    <h2>Failed airway / emergency</h2>
+    <p>Jump straight to the failed airway algorithm or resume the current RSI.</p>
     <button id="emgToFailed" class="bigbtn emergency">Go to Failed Airway</button>
     <button id="emgResume" class="bigbtn ghost">Resume RSI</button>
   </div>
 </div>
 
-<script src="js/data.js?v=3"></script>
-<script src="js/calculators.js?v=3"></script>
-<script src="js/storage.js?v=3"></script>
-<script src="js/voice.js?v=3"></script>
-<script src="js/rsi.js?v=3"></script>
-<script src="js/app.js?v=3"></script>
+<script src="js/data.js"></script>
+<script src="js/calculators.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/voice.js"></script>
+<script src="js/rsi.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
