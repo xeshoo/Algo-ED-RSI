@@ -393,4 +393,73 @@ function wireStepBody(step, s){
   });
 
   document.querySelectorAll("[data-timerstart]").forEach(btn=>btn.addEventListener("click", ()=>startGenericTimer(btn.dataset.timerstart)));
-  do
+  document.querySelectorAll("[data-timerreset]").forEach(btn=>btn.addEventListener("click", ()=>resetGenericTimer(btn.dataset.timerreset)));
+
+  const laryStart = document.getElementById("laryStart");
+  if(laryStart) laryStart.addEventListener("click", ()=>{ RSI.logEvent(`Laryngoscopy attempt ${s.attemptNumber+1} started`); startLaryngoscopyTimer(); });
+  const laryNew = document.getElementById("laryNewAttempt");
+  if(laryNew) laryNew.addEventListener("click", ()=>{ s.attemptNumber++; RSI.logEvent(`New attempt (#${s.attemptNumber+1})`); RSI.renderStepBody(step); });
+  const tubeIn = document.getElementById("tubeInsertedBtn");
+  if(tubeIn) tubeIn.addEventListener("click", ()=>{ RSI.logEvent("Tube inserted"); RSI.vibrate(40); tubeIn.textContent="✓ Logged"; tubeIn.disabled=true; });
+
+  const cormack = document.getElementById("cormackSelect");
+  if(cormack) cormack.addEventListener("change", e=>s.cormackLehane = e.target.value);
+  const bougie = document.getElementById("bougieCheck");
+  if(bougie) bougie.addEventListener("change", e=>s.bougieUsed = e.target.checked);
+  const operator = document.getElementById("operatorInput");
+  if(operator) operator.addEventListener("input", e=>s.operator = e.target.value);
+  const assistant = document.getElementById("assistantInput");
+  if(assistant) assistant.addEventListener("input", e=>s.assistant = e.target.value);
+  const complications = document.getElementById("complicationsInput");
+  if(complications) complications.addEventListener("input", e=>s.complications = e.target.value);
+
+  const genBtn = document.getElementById("genReportBtn");
+  if(genBtn) genBtn.addEventListener("click", ()=>{
+    s.tubeSize = document.getElementById("finalTubeSize").value;
+    s.tubeDepth = document.getElementById("finalTubeDepth").value;
+    RSI.logEvent("Documentation generated");
+    App.buildReportFromRSI(s);
+    App.navigate("reports");
+  });
+}
+
+/* ---------------- generic timers ---------------- */
+const _timerHandles = {};
+function startGenericTimer(id){
+  const el = document.getElementById(id);
+  if(!el || _timerHandles[id]) return;
+  let remaining = parseInt(el.dataset.remaining,10);
+  _timerHandles[id] = setInterval(()=>{
+    remaining--;
+    el.dataset.remaining = remaining;
+    el.querySelector(".n").textContent = fmtTime(Math.max(remaining,0));
+    if(remaining <= 0){ clearInterval(_timerHandles[id]); delete _timerHandles[id]; RSI.vibrate([80,40,80]); }
+  },1000);
+}
+function resetGenericTimer(id){
+  const el = document.getElementById(id);
+  if(_timerHandles[id]){ clearInterval(_timerHandles[id]); delete _timerHandles[id]; }
+  el.dataset.remaining = el.dataset.seconds;
+  el.querySelector(".n").textContent = fmtTime(parseInt(el.dataset.seconds,10));
+}
+
+/* ---------------- laryngoscopy 30s attempt timer ---------------- */
+let _laryCount = 0, _laryHandle = null;
+function startLaryngoscopyTimer(){
+  const el = document.getElementById("laryTimer");
+  if(_laryHandle) return;
+  el.classList.remove("warn");
+  _laryCount = 0;
+  el.querySelector(".n").textContent = "00";
+  _laryHandle = setInterval(()=>{
+    _laryCount++;
+    el.querySelector(".n").textContent = String(_laryCount).padStart(2,"0");
+    if(_laryCount >= 30){
+      clearInterval(_laryHandle); _laryHandle = null;
+      el.classList.add("warn");
+      RSI.vibrate([200,100,200,100,200]);
+      Voice.say("Stop attempt.");
+      RSI.logEvent("Attempt reached 30s — stop called");
+    }
+  },1000);
+}
