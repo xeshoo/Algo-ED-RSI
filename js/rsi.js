@@ -567,18 +567,31 @@ const RSI = (() => {
       <div class="rsi-clock" id="stepTimer">${step.timer.duration || 0}s</div>
       <button id="stepTimerStart" class="bigbtn primary small">START</button>
     </div>`;
+    html += `<div class="bigbtns" style="margin-top:10px">
+      <button id="stepTimerSkip" class="bigbtn ghost">SKIP TIMER</button>
+    </div>`;
     body.innerHTML = html;
 
     let remaining = step.timer.duration || 60;
     let timerRunning = false;
     const timerEl = body.querySelector("#stepTimer");
     const startBtn = body.querySelector("#stepTimerStart");
+    const skipBtn = body.querySelector("#stepTimerSkip");
+
+    // Skip button — proceed immediately
+    skipBtn?.addEventListener("click", () => {
+      timestamp(`Timer skipped: ${step.timer.label}`);
+      Voice.speak("Timer skipped.");
+      $("#rsiNext").disabled = false;
+      next();
+    });
 
     startBtn?.addEventListener("click", () => {
       if (timerRunning) return;
       timerRunning = true;
       startBtn.disabled = true;
       startBtn.textContent = "RUNNING";
+      skipBtn.style.display = "none";
       timestamp(`Timer started: ${step.timer.label}`);
       Voice.speak(`Timer started. ${step.timer.label}`);
 
