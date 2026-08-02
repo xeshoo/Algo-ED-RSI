@@ -9,12 +9,12 @@ const ASSETS = [
   "./index.html",
   "./manifest.json",
   "./css/style.css",
-  "./js/data.js",
-  "./js/calculators.js",
-  "./js/storage.js",
-  "./js/voice.js",
-  "./js/rsi.js",
-  "./js/app.js",
+  "./js/data.js?v=3",
+  "./js/calculators.js?v=3",
+  "./js/storage.js?v=3",
+  "./js/voice.js?v=3",
+  "./js/rsi.js?v=3",
+  "./js/app.js?v=3",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png"
@@ -32,6 +32,13 @@ self.addEventListener("activate", (event) => {
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+// Allow page to force-activate new service worker
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 // Cache-first, falling back to network, falling back to cached index.html
